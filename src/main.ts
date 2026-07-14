@@ -8,7 +8,8 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
-  app.useLogger(app.get(Logger));
+  const logger = app.get(Logger);
+  app.useLogger(logger);
 
   const config = app.get(ConfigService);
 
@@ -38,7 +39,8 @@ async function bootstrap() {
     }),
   );
 
-  if (config.getOrThrow<boolean>('app.swaggerEnabled')) {
+  const swaggerEnabled = config.getOrThrow<boolean>('app.swaggerEnabled');
+  if (swaggerEnabled) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('API')
       .setDescription('Documentación de la API')
@@ -52,5 +54,13 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   await app.listen(config.getOrThrow<number>('app.port'));
+
+  const url = (await app.getUrl()).replace(/\[::1?\]|0\.0\.0\.0/, 'localhost');
+  logger.log(
+    `Servidor escuchando en ${url}/${config.getOrThrow<string>('app.apiPrefix')}/v1`,
+  );
+  if (swaggerEnabled) {
+    logger.log(`Documentación disponible en ${url}/docs`);
+  }
 }
 void bootstrap();

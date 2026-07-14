@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
 
 @Module({
   imports: [
@@ -16,6 +17,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
         ssl: config.get<boolean>('database.ssl')
           ? { rejectUnauthorized: false }
           : false,
+        // Columnas/joins en snake_case sin declarar `name` en cada @Column.
+        namingStrategy: new SnakeNamingStrategy(),
         autoLoadEntities: true,
         // Nunca sincronizar el schema automáticamente: usar migraciones (pnpm migration:run).
         synchronize: false,
