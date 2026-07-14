@@ -163,6 +163,41 @@ pnpm migration:revert
 
 > El CLI usa [data-source.ts](src/database/data-source.ts) (lee el `.env`); la app se configura aparte en [database.module.ts](src/database/database.module.ts). Ambos comparten la naming strategy.
 
+### Transacciones
+
+**Buena práctica obligatoria**: cuando un use case escribe en **múltiples tablas** (o hace varias escrituras que deben ser atómicas), las operaciones van dentro de una **transacción**. Si algo falla a mitad de camino, se hace rollback automático de todo y la DB nunca queda en estado inconsistente (ej.: una orden creada sin sus ítems, un paciente sin su historia clínica inicial).
+
+El patrón: el use case inyecta `DataSource` y usa `dataSource.transaction()`. Todas las escrituras dentro del callback deben hacerse con el `manager` transaccional — una escritura hecha con el repository inyectado quedaría **fuera** de la transacción y no participaría del rollback.
+
+```ts
+@Injectable()
+export class CreateOrderUseCase {
+  constructor(private readonly dataSource: DataSource) {}
+
+  async execute(dto: CreateOrderDto): Promise<Order> {
+    return this.dataSource.transaction(async (manager) => {
+      const order = await manager.save(
+        manager.create(Order, { customerId: dto.customerId }),
+      );
+      const items = dto.items.map((item) =>
+        manager.create(OrderItem, { ...item, orderId: order.id }),
+      );
+      await manager.save(items);
+      // Si cualquier operación lanza una excepción, TypeORM hace ROLLBACK
+      // de todo; si el callback termina bien, hace COMMIT.
+      return order;
+    });
+  }
+}
+```
+
+Reglas prácticas:
+
+- **Una escritura en una sola tabla no necesita transacción** — no agregar overhead donde no aporta.
+- La transacción se abre y se cierra **dentro del use case** (es parte de la lógica de negocio); nunca en el controller ni en el service.
+- Mantener la transacción **corta**: solo operaciones de DB. Nada de llamadas HTTP, colas o envío de emails dentro del callback — mantienen la conexión tomada y los locks abiertos.
+- Los efectos externos (notificaciones, webhooks) van **después** del commit: si van dentro y la transacción hace rollback, el efecto externo ya salió y no se puede deshacer.
+
 ## Logs
 
 Configurados en [logger.config.ts](src/config/logger.config.ts) con `pino.multistream` (varios destinos a la vez):
