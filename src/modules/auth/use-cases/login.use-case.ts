@@ -15,12 +15,11 @@ export class LoginUseCase {
   ) {}
 
   async execute(email: string, password: string): Promise<AuthTokensDto> {
-    // addSelect: password es select:false y el login la necesita.
-    const user = await this.usersRepository
-      .createQueryBuilder('user')
-      .addSelect('user.password')
-      .where('user.email = :email', { email })
-      .getOne();
+    const user = await this.usersRepository.findOne({
+      where: { email },
+      // password es select:false: hay que pedirla explícitamente.
+      select: { id: true, email: true, password: true },
+    });
 
     // Mismo error exista o no el email: evita enumeración de usuarios.
     if (!user || !(await argon2.verify(user.password, password))) {

@@ -14,12 +14,11 @@ export class RefreshTokensUseCase {
   ) {}
 
   async execute(userId: string, refreshToken: string): Promise<AuthTokensDto> {
-    // addSelect: refreshTokenHash es select:false y acá hay que compararlo.
-    const user = await this.usersRepository
-      .createQueryBuilder('user')
-      .addSelect('user.refreshTokenHash')
-      .where('user.id = :id', { id: userId })
-      .getOne();
+    const user = await this.usersRepository.findOne({
+      where: { id: userId },
+      // refreshTokenHash es select:false: hay que pedirla explícitamente.
+      select: { id: true, email: true, refreshTokenHash: true },
+    });
 
     if (!user || !user.refreshTokenHash) {
       throw new UnauthorizedException('Invalid refresh token');

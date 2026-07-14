@@ -1,15 +1,34 @@
 # base-nestjs
 
-Plantilla base para APIs con [NestJS](https://nestjs.com) 11, pensada para iniciar proyectos con las piezas que toda API necesita ya resueltas: configuración validada, autenticación JWT con refresh tokens, PostgreSQL con migraciones, logging estructurado, rate limiting y las medidas de seguridad básicas activadas por defecto.
+Plantilla base para APIs REST con [NestJS](https://nestjs.com) 11, pensada para arrancar proyectos con las piezas que toda API necesita ya resueltas y con la seguridad activada por defecto: autenticación JWT en cookies `httpOnly` con rotación de refresh tokens, PostgreSQL con migraciones, configuración validada al arranque, logging estructurado, rate limiting y arquitectura por use cases.
 
 ## Stack
 
-- **NestJS 11** + TypeScript + pnpm
-- **PostgreSQL + TypeORM** (migraciones con el CLI, `synchronize` deshabilitado siempre)
-- **Auth JWT**: access + refresh token con rotación y detección de reuso
-- **nestjs-pino**: logs JSON con `x-request-id` por petición + archivos con rotación
-- **Swagger** en `/docs` (deshabilitado en producción por defecto)
-- **Docker**: Dockerfile multi-stage + docker-compose para la DB local
+| Pieza | Tecnología |
+|---|---|
+| Framework | NestJS 11 + TypeScript + pnpm |
+| Base de datos | PostgreSQL + TypeORM (migraciones, `synchronize` siempre deshabilitado) |
+| Autenticación | JWT access + refresh en cookies `httpOnly`, rotación con detección de reuso |
+| Passwords | argon2id |
+| Logging | nestjs-pino: JSON estructurado, `x-request-id`, archivos con rotación |
+| Documentación | Swagger en `/docs` (deshabilitado en producción por defecto) |
+| Contenedores | Dockerfile multi-stage (usuario no-root) + docker-compose para la DB local |
+
+## Arquitectura
+
+Cada módulo sigue la cadena **Controller → Service → Use cases**:
+
+```
+HTTP → Controller ──► Service (fachada) ──► Use case ──► Repository de TypeORM
+        DTOs,           un método por        toda la lógica
+        guards,         use case, sin        de negocio, una
+        swagger         lógica               clase por operación
+```
+
+- **Use cases** (`use-cases/`): toda la lógica de negocio, fragmentada en una clase por operación con un único método `execute()`. Acceden a los datos inyectando el `Repository` de TypeORM directamente.
+- **Service**: fachada del módulo. No contiene lógica de negocio, solo canaliza los use cases.
+- **Controller**: llama al service y mantiene la estructura estándar de Nest (DTOs, decoradores, Swagger).
+- La lógica de soporte compartida entre use cases de un módulo (p. ej. `TokenService` o `CookieService` en auth) va en un provider aparte, no en el service.
 
 ## Quickstart
 
@@ -19,8 +38,8 @@ pnpm install
 
 # 2. Variables de entorno
 cp .env.example .env
-# Generar secretos JWT reales:
-#   openssl rand -hex 32   (uno para ACCESS y otro distinto para REFRESH)
+# Generar secretos JWT reales (uno para ACCESS y otro distinto para REFRESH):
+#   openssl rand -hex 32
 
 # 3. Base de datos local
 docker compose up -d
@@ -32,11 +51,18 @@ pnpm migration:run
 pnpm start:dev
 ```
 
-La API queda en `http://localhost:3000/api/v1`, el health check en `http://localhost:3000/health` y Swagger en `http://localhost:3000/docs`.
+Al arrancar, el log muestra las URLs:
+
+```
+INFO: Servidor escuchando en http://localhost:3000/api/v1
+INFO: Documentación disponible en http://localhost:3000/docs
+```
+
+El health check queda en `http://localhost:3000/health` (fuera del prefijo de la API, para los probes de infraestructura).
 
 ## Variables de entorno
 
-Validadas con Joi al arranque ([env.validation.ts](src/config/env.validation.ts)): si falta una obligatoria, la app no arranca.
+Validadas con Joi al arranque ([env.validation.ts](src/config/env.validation.ts)): si falta una obligatoria o hay un valor inválido, la app **no arranca** (fail-fast con mensaje claro).
 
 | Variable | Descripción | Default |
 |---|---|---|
@@ -57,39 +83,85 @@ Validadas con Joi al arranque ([env.validation.ts](src/config/env.validation.ts)
 
 ## Autenticación
 
-Flujo JWT con **access token** (corto, 15 min) y **refresh token** (largo, 7 días) firmados con secretos distintos. Los tokens se entregan en **cookies `httpOnly`** (`access_token` y `refresh_token`), **nunca en el body**: si viajaran en la respuesta, un XSS podría llamar a `/refresh` y leer tokens frescos, anulando el beneficio de `httpOnly`.
+Flujo JWT con **access token** (corto, 15 min) y **refresh token** (largo, 7 días) firmados con secretos distintos. Los tokens se entregan en **cookies `httpOnly`** (`access_token` y `refresh_token`), **nunca en el body**: si viajaran en la respuesta, un XSS podría llamar a `/refresh` (la cookie viaja sola) y leer tokens frescos, anulando el beneficio de `httpOnly`.
 
-- `POST /api/v1/auth/register` — crea el usuario (password hasheado con **argon2id**) y setea las cookies.
-- `POST /api/v1/auth/login` — setea las cookies. El error es el mismo 401 exista o no el email (evita enumeración de usuarios).
-- `POST /api/v1/auth/refresh` — lee el refresh de su cookie, rota el par y setea las nuevas. Si se presenta un refresh ya rotado (firma válida, hash distinto), se asume robo y **se revoca la sesión completa**.
-- `POST /api/v1/auth/logout` — revoca el refresh token y limpia las cookies.
+| Endpoint | Qué hace |
+|---|---|
+| `POST /api/v1/auth/register` | Crea el usuario (password con **argon2id**) y setea las cookies |
+| `POST /api/v1/auth/login` | Setea las cookies. Mismo 401 exista o no el email (evita enumeración de usuarios) |
+| `POST /api/v1/auth/refresh` | Lee el refresh de su cookie, **rota el par** y setea las nuevas cookies |
+| `POST /api/v1/auth/logout` | Revoca el refresh token y limpia las cookies |
 
-Propiedades de las cookies (`cookie.service.ts`):
+**Rotación con detección de reuso**: cada refresh invalida el token anterior. Si se presenta un refresh ya rotado (firma válida pero hash distinto al guardado), se asume robo y **se revoca la sesión completa** — el refresh vigente también deja de servir.
+
+Del refresh token solo se guarda su **hash SHA-256** en la DB (columna `refresh_token_hash`), nunca el token en claro.
+
+### Propiedades de las cookies ([cookie.service.ts](src/modules/auth/cookie.service.ts))
 
 - `httpOnly` — el JS del navegador no puede leerlas (mitiga robo por XSS).
 - `SameSite=Lax` — no viajan en peticiones cross-site (mitiga CSRF).
 - `Secure` — solo HTTPS; activo en producción por defecto (`COOKIE_SECURE`).
-- La cookie de refresh tiene `Path=/api/v1/auth/refresh`: solo viaja al endpoint que la necesita.
+- La cookie de refresh tiene `Path=/api/v1/auth/refresh`: el token de larga vida solo viaja al único endpoint que lo necesita.
 - El `maxAge` de cada cookie se deriva del TTL del JWT correspondiente.
 
-El frontend debe hacer sus peticiones con `credentials: 'include'` (CORS ya responde con `Access-Control-Allow-Credentials`). Las estrategias también aceptan `Authorization: Bearer` como fallback para clientes API/móviles.
+### Consumir la API
 
-El guard JWT es **global**: toda ruta exige token salvo que esté marcada con `@Public()`. Para acceder al usuario autenticado: `@CurrentUser() user: AuthenticatedUser`.
+- **Navegadores / SPAs**: hacer las peticiones con `credentials: 'include'` (CORS ya responde con `Access-Control-Allow-Credentials`). No hay que manejar tokens a mano.
+- **Clientes API / móviles**: las estrategias también aceptan `Authorization: Bearer <token>` como fallback.
 
-Del refresh token solo se guarda su **hash SHA-256** en la DB (columna `refresh_token_hash`), nunca el token en claro.
+### Proteger rutas
+
+El guard JWT es **global**: toda ruta nueva exige token automáticamente, salvo que se marque con `@Public()`. Para acceder al usuario autenticado:
+
+```ts
+@Get('me')
+me(@CurrentUser() user: AuthenticatedUser) { ... }
+```
 
 > **Nota de diseño**: hay una sesión de refresh activa por usuario (simple y suficiente para la mayoría de APIs). Para multi-dispositivo, extender a una tabla `refresh_tokens` con `jti` por sesión.
 
 ## Seguridad incluida
 
-- **helmet** (headers de seguridad) y **CORS** restringido a `CORS_ORIGINS`
-- **Rate limiting** global (`@nestjs/throttler`) + límite estricto de 5/min en los endpoints de auth
-- **ValidationPipe global** con `whitelist` + `forbidNonWhitelisted`: cualquier propiedad fuera del DTO rechaza la petición
-- **ClassSerializerInterceptor global**: `password` y `refreshTokenHash` tienen `@Exclude()` (y `select: false`), jamás salen en una respuesta
-- **Filtro global de excepciones**: formato de error uniforme con `requestId`, sin stack traces ni detalles internos al cliente
-- **Logs con redacción**: `authorization`, `cookie`, `password` y `refreshToken` aparecen `[Redacted]`
-- **Fail-fast de configuración**: env inválido aborta el boot con mensaje claro
-- **Graceful shutdown** (`enableShutdownHooks`) y contenedor con usuario no-root
+- **Tokens en cookies `httpOnly`** con `SameSite=Lax` y `Secure` en producción.
+- **helmet** (headers de seguridad) y **CORS** restringido a `CORS_ORIGINS`.
+- **Rate limiting** global (`@nestjs/throttler`) + límite estricto de 5/min en los endpoints de auth (blanco típico de fuerza bruta).
+- **ValidationPipe global** con `whitelist` + `forbidNonWhitelisted`: cualquier propiedad fuera del DTO rechaza la petición.
+- **ClassSerializerInterceptor global**: `password` y `refreshTokenHash` tienen `@Exclude()` (y `select: false` en la entidad), jamás salen en una respuesta.
+- **Filtro global de excepciones**: formato de error uniforme con `requestId`, sin stack traces ni detalles internos al cliente.
+- **Logs con redacción**: `authorization`, `cookie`, `password` y `refreshToken` aparecen como `[Redacted]`.
+- **Fail-fast de configuración**: env inválido aborta el boot.
+- **Graceful shutdown** (`enableShutdownHooks`) y contenedor con usuario no-root.
+
+## Base de datos
+
+### Entidades
+
+Toda entidad extiende [`BaseEntity`](src/common/entities/base.entity.ts), que aporta `id` (uuid), `createdAt`, `updatedAt` y `deletedAt` (**soft delete**: los registros borrados con `softDelete`/`softRemove` quedan marcados y las queries los excluyen automáticamente).
+
+Los nombres de columnas, joins y tablas de unión se generan en **snake_case** automáticamente (`SnakeNamingStrategy`): `createdAt` → `created_at` sin declarar `name` en cada `@Column`.
+
+```ts
+@Entity('pacientes')
+export class Paciente extends BaseEntity {
+  @Column()
+  numeroDocumento: string; // → columna numero_documento
+}
+```
+
+### Migraciones
+
+`synchronize` está deshabilitado siempre: el schema se maneja con migraciones. Después de crear o modificar una entidad:
+
+```bash
+# Generar una migración a partir de los cambios en las entidades
+pnpm migration:generate src/database/migrations/NombreDelCambio
+
+# Ejecutar / revertir
+pnpm migration:run
+pnpm migration:revert
+```
+
+> El CLI usa [data-source.ts](src/database/data-source.ts) (lee el `.env`); la app se configura aparte en [database.module.ts](src/database/database.module.ts). Ambos comparten la naming strategy.
 
 ## Logs
 
@@ -104,73 +176,70 @@ Configurados en [logger.config.ts](src/config/logger.config.ts) con `pino.multis
 
 Los archivos rotan a diario o al superar 20 MB, los rotados se comprimen con gzip y los más viejos se borran solos (retención: 14 archivos para combined, 30 para error). Para agregar un destino nuevo (S3, CloudWatch, etc.) basta sumar una factory en `buildDestinations()`.
 
-En Docker, montar un volumen en `/app/logs` si se quiere persistir los archivos fuera del contenedor.
-
-## Base de datos y migraciones
-
-`synchronize` está deshabilitado siempre: el schema se maneja con migraciones.
-
-Los nombres de columnas, joins y tablas de unión se generan en **snake_case** automáticamente (`SnakeNamingStrategy`): `createdAt` → `created_at` sin declarar `name` en cada `@Column`. Toda entidad debe extender `BaseEntity` (`src/common/entities/base.entity.ts`), que aporta `id` uuid, `createdAt` y `updatedAt`.
-
-```bash
-# Generar una migración a partir de cambios en las entidades
-pnpm migration:generate src/database/migrations/NombreDelCambio
-
-# Ejecutar / revertir
-pnpm migration:run
-pnpm migration:revert
-```
+Cada petición lleva un `x-request-id` que aparece en todos sus logs y en las respuestas de error — permite correlacionar un error reportado con su traza exacta.
 
 ## Tests
 
 ```bash
-pnpm test        # unit (auth.service: hashing, login no-enumerable, rotación, reuso)
-pnpm test:e2e    # flujo completo (requiere la DB de docker compose + migraciones)
+pnpm test        # unit: flujo de auth completo vía la fachada (hashing, login
+                 # no-enumerable, rotación, detección de reuso)
+pnpm test:e2e    # e2e con HTTP y DB reales: cookies httpOnly, rotación, logout,
+                 # validación de DTOs, health (requiere docker compose + migraciones)
 ```
 
 ## Docker (producción)
+
+Imagen multi-stage: compila, poda a dependencias de producción y corre como usuario no-root.
 
 ```bash
 docker build -t base-nestjs .
 docker run --env-file .env -p 3000:3000 base-nestjs
 ```
 
-## Arquitectura de módulos
-
-Cada módulo sigue la cadena **Controller → Service → Use cases**:
-
-- **Use cases** (`use-cases/`): toda la lógica de negocio, fragmentada en una clase por operación con un único método `execute()`. Acceden a los datos inyectando el `Repository` de TypeORM directamente.
-- **Service**: fachada del módulo. No contiene lógica de negocio, solo canaliza los use cases (un método por use case).
-- **Controller**: llama al service, mantiene la estructura estándar de Nest (DTOs, decoradores, Swagger).
-
-La lógica de soporte compartida entre use cases de un módulo (p. ej. `TokenService` en auth) va en un provider aparte del módulo, no en el service.
+Los logs de archivo se escriben en `/app/logs`: montar un volumen ahí si se quiere persistirlos fuera del contenedor.
 
 ## Estructura
 
 ```
 src/
-├── main.ts                  # bootstrap: helmet, CORS, pipes, versioning, swagger
+├── main.ts                  # bootstrap: helmet, cookies, CORS, pipes, versioning, swagger
 ├── app.module.ts            # config, DB, logger, throttler + providers globales
 ├── config/                  # validación Joi + configs tipadas por dominio
-├── common/                  # @Public, @CurrentUser, BaseEntity, filtro de excepciones
+├── common/
+│   ├── decorators/          # @Public, @CurrentUser
+│   ├── entities/            # BaseEntity (id, timestamps, soft delete)
+│   └── filters/             # filtro global de excepciones
 ├── database/                # módulo TypeORM, data-source del CLI, migraciones
 ├── modules/
-│   ├── users/               # entidad User + GET /users/me de ejemplo
+│   ├── users/
+│   │   ├── entities/        # entidad User
 │   │   ├── use-cases/       # get-profile
 │   │   ├── users.service.ts # fachada
-│   │   └── ...
-│   └── auth/                # register/login/refresh/logout, estrategias, guards
+│   │   └── users.controller.ts
+│   └── auth/
+│       ├── dto/             # register, login
+│       ├── guards/          # jwt, jwt-refresh
+│       ├── strategies/      # extracción cookie-first con fallback Bearer
 │       ├── use-cases/       # register, login, refresh-tokens, logout
-│       ├── token.service.ts # soporte compartido: emisión y hash de tokens
-│       ├── cookie.service.ts# entrega/limpieza de tokens en cookies httpOnly
+│       ├── token.service.ts # soporte: emisión y hash de tokens
+│       ├── cookie.service.ts# soporte: entrega/limpieza de cookies httpOnly
 │       ├── auth.service.ts  # fachada
-│       └── ...
+│       └── auth.controller.ts
 └── health/                  # GET /health con ping a la DB (Terminus)
 ```
+
+## Cómo crear un módulo nuevo
+
+1. Crear la carpeta en `src/modules/<nombre>/` siguiendo el patrón de `users`.
+2. La entidad extiende `BaseEntity` y va en `entities/`. Generar y correr la migración.
+3. La lógica de negocio va en `use-cases/`, una clase por operación con método `execute()`.
+4. El service es la fachada: un método por use case, sin lógica.
+5. El controller llama al service. Toda ruta nueva queda **protegida por defecto**; marcar con `@Public()` solo lo que deba ser público.
+6. Registrar entidad (`TypeOrmModule.forFeature`), use cases y service como providers del módulo.
 
 ## Cómo empezar un proyecto desde esta plantilla
 
 1. Clonar / usar como template y renombrar en `package.json`.
-2. `cp .env.example .env` y generar secretos reales.
-3. Crear tus módulos en `src/modules/` siguiendo el patrón de `users`: lógica de negocio en `use-cases/`, service como fachada, controller llamando al service.
-4. Toda ruta nueva queda protegida por defecto; marca con `@Public()` solo lo que deba ser público.
+2. `cp .env.example .env` y generar secretos reales con `openssl rand -hex 32`.
+3. Ajustar `CORS_ORIGINS` al dominio del frontend.
+4. Crear los módulos de dominio siguiendo la guía anterior.

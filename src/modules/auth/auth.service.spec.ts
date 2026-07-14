@@ -16,17 +16,11 @@ import { RegisterUseCase } from './use-cases/register.use-case';
 // valida el wiring completo del módulo, solo se mockea la infraestructura.
 describe('AuthService', () => {
   let authService: AuthService;
-  let queryBuilder: {
-    addSelect: jest.Mock;
-    where: jest.Mock;
-    getOne: jest.Mock;
-  };
   let usersRepository: {
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
     update: jest.Mock;
-    createQueryBuilder: jest.Mock;
   };
 
   const user = {
@@ -46,17 +40,11 @@ describe('AuthService', () => {
   };
 
   beforeEach(async () => {
-    queryBuilder = {
-      addSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      getOne: jest.fn(),
-    };
     usersRepository = {
       findOne: jest.fn(),
       create: jest.fn().mockImplementation((data: Partial<User>) => data),
       save: jest.fn().mockResolvedValue(user),
       update: jest.fn(),
-      createQueryBuilder: jest.fn(() => queryBuilder),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -126,7 +114,7 @@ describe('AuthService', () => {
   describe('login', () => {
     it('returns tokens and persists the refresh hash on valid credentials', async () => {
       const password = 'super-secret-password';
-      queryBuilder.getOne.mockResolvedValue({
+      usersRepository.findOne.mockResolvedValue({
         ...user,
         password: await argon2.hash(password),
       });
@@ -141,12 +129,12 @@ describe('AuthService', () => {
     });
 
     it('returns the same 401 whether the email exists or the password is wrong', async () => {
-      queryBuilder.getOne.mockResolvedValue(null);
+      usersRepository.findOne.mockResolvedValue(null);
       const unknownEmailError = await authService
         .login('nobody@example.com', 'whatever-password')
         .catch((e: Error) => e);
 
-      queryBuilder.getOne.mockResolvedValue({
+      usersRepository.findOne.mockResolvedValue({
         ...user,
         password: await argon2.hash('the-right-password'),
       });
@@ -165,14 +153,14 @@ describe('AuthService', () => {
   describe('refreshTokens', () => {
     it('rotates the refresh token when the presented token matches the stored hash', async () => {
       const password = 'super-secret-password';
-      queryBuilder.getOne.mockResolvedValue({
+      usersRepository.findOne.mockResolvedValue({
         ...user,
         password: await argon2.hash(password),
       });
       const { refreshToken } = await authService.login(user.email, password);
       const storedHash = lastStoredHash();
 
-      queryBuilder.getOne.mockResolvedValue({
+      usersRepository.findOne.mockResolvedValue({
         ...user,
         refreshTokenHash: storedHash,
       });
@@ -185,7 +173,7 @@ describe('AuthService', () => {
     });
 
     it('revokes the session on token reuse (valid signature, mismatched hash)', async () => {
-      queryBuilder.getOne.mockResolvedValue({
+      usersRepository.findOne.mockResolvedValue({
         ...user,
         refreshTokenHash: 'hash-of-the-current-token',
       });
@@ -199,7 +187,7 @@ describe('AuthService', () => {
     });
 
     it('rejects when no refresh session exists', async () => {
-      queryBuilder.getOne.mockResolvedValue({
+      usersRepository.findOne.mockResolvedValue({
         ...user,
         refreshTokenHash: null,
       });
