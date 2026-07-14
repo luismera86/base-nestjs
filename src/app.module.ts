@@ -7,8 +7,11 @@ import {
   Reflector,
 } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { join } from 'node:path';
+import { AcceptLanguageResolver, I18nModule } from 'nestjs-i18n';
 import { LoggerModule } from 'nestjs-pino';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { createI18nValidationFilter } from './common/filters/i18n-validation.filter';
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
 import {
@@ -40,6 +43,15 @@ import { UsersModule } from './modules/users/users.module';
       inject: [ConfigService],
       useFactory: throttlerFactory,
     }),
+    // Idioma por request vía Accept-Language (es | en); por defecto español.
+    I18nModule.forRoot({
+      fallbackLanguage: 'es',
+      loaderOptions: {
+        path: join(__dirname, '/i18n/'),
+        watch: true,
+      },
+      resolvers: [AcceptLanguageResolver],
+    }),
     DatabaseModule,
     UsersModule,
     AuthModule,
@@ -49,7 +61,10 @@ import { UsersModule } from './modules/users/users.module';
     // Orden de guards: primero rate limit, luego auth.
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // Nest evalúa los filtros en orden inverso al registro: el de validación
+    // (más específico) debe ir DESPUÉS del catch-all para tener prioridad.
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    { provide: APP_FILTER, useValue: createI18nValidationFilter() },
     {
       provide: APP_INTERCEPTOR,
       inject: [Reflector],

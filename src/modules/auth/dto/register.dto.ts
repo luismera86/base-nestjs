@@ -1,13 +1,14 @@
 import { Transform } from 'class-transformer';
 import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
+import { i18nValidationMessage } from 'nestjs-i18n';
 
 export class RegisterDto {
-  @IsEmail()
+  @IsEmail({}, { message: i18nValidationMessage('validation.IS_EMAIL') })
   @Transform(({ value }: { value: string }) => value?.toLowerCase().trim())
   email: string;
 
-  @IsString()
-  @MinLength(12, { message: 'password must be at least 12 characters long' })
-  @MaxLength(128)
+  @IsString({ message: i18nValidationMessage('validation.IS_STRING') })
+  @MinLength(12, { message: i18nValidationMessage('validation.MIN_LENGTH') })
+  @MaxLength(128, { message: i18nValidationMessage('validation.MAX_LENGTH') })
   password: string;
 }

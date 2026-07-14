@@ -1,0 +1,6 @@
+{
+  "IS_EMAIL": "{property} debe ser un correo electrónico válido",
+  "IS_STRING": "{property} debe ser una cadena de texto",
+  "MIN_LENGTH": "{property} debe tener al menos {constraints.0} caracteres",
+  "MAX_LENGTH": "{property} debe tener como máximo {constraints.0} caracteres"
+}

@@ -34,7 +34,7 @@ export class JwtRefreshStrategy extends PassportStrategy(
   ): AuthenticatedUserWithRefreshToken {
     const refreshToken = extractRefreshToken(request);
     if (!refreshToken) {
-      throw new UnauthorizedException();
+      throw new UnauthorizedException('errors.UNAUTHORIZED');
     }
     return { id: payload.sub, email: payload.email, refreshToken };
   }

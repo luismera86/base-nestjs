@@ -1,0 +1,9 @@
+{
+  "UNAUTHORIZED": "Unauthorized",
+  "INVALID_CREDENTIALS": "Invalid credentials",
+  "INVALID_REFRESH_TOKEN": "Invalid refresh token",
+  "EMAIL_ALREADY_REGISTERED": "Email already registered",
+  "USER_NOT_FOUND": "User not found",
+  "TOO_MANY_REQUESTS": "Too many requests, please try again later",
+  "INTERNAL_SERVER_ERROR": "Internal server error"
+}

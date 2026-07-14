@@ -17,7 +17,7 @@ export class RegisterUseCase {
   async execute(email: string, password: string): Promise<AuthTokensDto> {
     const existing = await this.usersRepository.findOne({ where: { email } });
     if (existing) {
-      throw new ConflictException('Email already registered');
+      throw new ConflictException('errors.EMAIL_ALREADY_REGISTERED');
     }
     const hashedPassword = await argon2.hash(password, {
       type: argon2.argon2id,

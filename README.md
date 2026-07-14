@@ -11,6 +11,7 @@ Plantilla base para APIs REST con [NestJS](https://nestjs.com) 11, pensada para 
 | Autenticación | JWT access + refresh en cookies `httpOnly`, rotación con detección de reuso |
 | Passwords | argon2id |
 | Logging | nestjs-pino: JSON estructurado, `x-request-id`, archivos con rotación |
+| i18n | nestjs-i18n: mensajes de error en `es`/`en` según `Accept-Language` (default: `es`) |
 | Documentación | Swagger en `/docs` (deshabilitado en producción por defecto) |
 | Contenedores | Dockerfile multi-stage (usuario no-root) + docker-compose para la DB local |
 
@@ -125,7 +126,7 @@ me(@CurrentUser() user: AuthenticatedUser) { ... }
 - **Tokens en cookies `httpOnly`** con `SameSite=Lax` y `Secure` en producción.
 - **helmet** (headers de seguridad) y **CORS** restringido a `CORS_ORIGINS`.
 - **Rate limiting** global (`@nestjs/throttler`) + límite estricto de 5/min en los endpoints de auth (blanco típico de fuerza bruta).
-- **ValidationPipe global** con `whitelist` + `forbidNonWhitelisted`: cualquier propiedad fuera del DTO rechaza la petición.
+- **ValidationPipe global** (`I18nValidationPipe`) con `whitelist` + `forbidNonWhitelisted`: cualquier propiedad fuera del DTO rechaza la petición.
 - **ClassSerializerInterceptor global**: `password` y `refreshTokenHash` tienen `@Exclude()` (y `select: false` en la entidad), jamás salen en una respuesta.
 - **Filtro global de excepciones**: formato de error uniforme con `requestId`, sin stack traces ni detalles internos al cliente.
 - **Logs con redacción**: `authorization`, `cookie`, `password` y `refreshToken` aparecen como `[Redacted]`.
@@ -213,6 +214,32 @@ Los archivos rotan a diario o al superar 20 MB, los rotados se comprimen con gzi
 
 Cada petición lleva un `x-request-id` que aparece en todos sus logs y en las respuestas de error — permite correlacionar un error reportado con su traza exacta.
 
+## Errores e i18n
+
+Toda respuesta de error sale con el mismo formato (armado en los filtros de [common/filters/](src/common/filters/)) y el `message` se traduce al idioma que el cliente pida en la cabecera `Accept-Language` (`es` | `en`; sin cabecera o idioma no soportado → español). Variantes regionales como `es-AR` o `en-US` resuelven al idioma base.
+
+```json
+{
+  "statusCode": 401,
+  "error": "Unauthorized",
+  "message": "Credenciales inválidas",
+  "path": "/api/v1/auth/login",
+  "timestamp": "2026-07-14T23:55:11.969Z",
+  "requestId": "e2775f18-..."
+}
+```
+
+Cómo funciona:
+
+- Los textos viven en [src/i18n/](src/i18n/) (`es/` y `en/`, un JSON por dominio). `nest build` los copia a `dist` (assets en `nest-cli.json`).
+- **Excepciones de negocio**: se lanzan con la clave de traducción como mensaje — `throw new UnauthorizedException('errors.INVALID_CREDENTIALS')` — y el filtro global ([all-exceptions.filter.ts](src/common/filters/all-exceptions.filter.ts)) la resuelve al idioma del request. Un mensaje que no empieza con `errors.` pasa tal cual.
+- **Validación de DTOs**: los decoradores usan `i18nValidationMessage('validation.XXX')` y el `I18nValidationPipe` global; [i18n-validation.filter.ts](src/common/filters/i18n-validation.filter.ts) traduce y mantiene el formato de respuesta. Placeholders disponibles: `{property}`, `{value}`, `{constraints.0}`.
+- El campo `error` (nombre del status HTTP) queda en inglés a propósito: es un identificador para máquinas, no un texto para mostrar.
+- Para agregar un idioma: crear `src/i18n/<lang>/` con los mismos JSON — el resolver lo detecta solo.
+- Limitación conocida: el mensaje de `forbidNonWhitelisted` ("property X should not exist") lo genera el propio pipe y no es traducible.
+
+Para agregar un error nuevo: sumar la clave en `es/errors.json` **y** `en/errors.json`, y lanzarla como mensaje de la excepción.
+
 ## Tests
 
 ```bash
@@ -243,7 +270,8 @@ src/
 ├── common/
 │   ├── decorators/          # @Public, @CurrentUser
 │   ├── entities/            # BaseEntity (id, timestamps, soft delete)
-│   └── filters/             # filtro global de excepciones
+│   └── filters/             # filtro global de excepciones + validación i18n
+├── i18n/                    # traducciones de errores y validación (es, en)
 ├── database/                # módulo TypeORM, data-source del CLI, migraciones
 ├── modules/
 │   ├── users/

@@ -15,4 +15,6 @@ export const throttlerFactory = (
       limit: config.getOrThrow<number>('throttler.limit'),
     },
   ],
+  // Clave de traducción: AllExceptionsFilter la resuelve al idioma del request.
+  errorMessage: 'errors.TOO_MANY_REQUESTS',
 });

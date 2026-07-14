@@ -13,7 +13,7 @@ export class GetProfileUseCase {
   async execute(userId: string): Promise<User> {
     const user = await this.usersRepository.findOne({ where: { id: userId } });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException('errors.USER_NOT_FOUND');
     }
     return user;
   }

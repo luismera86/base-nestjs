@@ -1,9 +1,10 @@
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import { I18nValidationPipe } from 'nestjs-i18n';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 
@@ -33,8 +34,9 @@ async function bootstrap() {
     defaultVersion: '1',
   });
 
+  // I18nValidationPipe = ValidationPipe + mensajes de error traducibles.
   app.useGlobalPipes(
-    new ValidationPipe({
+    new I18nValidationPipe({
       whitelist: true, // descarta propiedades fuera del DTO
       forbidNonWhitelisted: true, // ...y además rechaza la petición si vienen
       transform: true,
@@ -50,6 +52,13 @@ async function bootstrap() {
       .setVersion('1.0')
       .addBearerAuth()
       .addCookieAuth('access_token')
+      .addGlobalParameters({
+        name: 'Accept-Language',
+        in: 'header',
+        required: false,
+        description: 'Idioma de los mensajes de error (por defecto: es)',
+        schema: { type: 'string', enum: ['es', 'en'], default: 'es' },
+      })
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('docs', app, document);

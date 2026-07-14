@@ -23,7 +23,7 @@ export class LoginUseCase {
 
     // Mismo error exista o no el email: evita enumeración de usuarios.
     if (!user || !(await argon2.verify(user.password, password))) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('errors.INVALID_CREDENTIALS');
     }
     return this.tokenService.issueTokens(user.id, user.email);
   }

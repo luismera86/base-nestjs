@@ -21,14 +21,14 @@ export class RefreshTokensUseCase {
     });
 
     if (!user || !user.refreshTokenHash) {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new UnauthorizedException('errors.INVALID_REFRESH_TOKEN');
     }
     const incomingHash = this.tokenService.hashToken(refreshToken);
     if (incomingHash !== user.refreshTokenHash) {
       // Firma válida pero hash distinto → posible reuso de un token rotado (robo).
       // Se revoca la sesión entera: el refresh vigente también deja de servir.
       await this.usersRepository.update(user.id, { refreshTokenHash: null });
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new UnauthorizedException('errors.INVALID_REFRESH_TOKEN');
     }
     return this.tokenService.issueTokens(user.id, user.email);
   }
