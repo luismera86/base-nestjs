@@ -2,23 +2,32 @@ import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import * as argon2 from 'argon2';
 import { User } from '../users/entities/user.entity';
-import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
+import { TokenService } from './token.service';
+import { LoginUseCase } from './use-cases/login.use-case';
+import { LogoutUseCase } from './use-cases/logout.use-case';
+import { RefreshTokensUseCase } from './use-cases/refresh-tokens.use-case';
+import { RegisterUseCase } from './use-cases/register.use-case';
 
+// Se testea a través de la fachada AuthService con los use cases reales:
+// valida el wiring completo del módulo, solo se mockea la infraestructura.
 describe('AuthService', () => {
   let authService: AuthService;
-  let usersService: jest.Mocked<
-    Pick<
-      UsersService,
-      | 'findByEmail'
-      | 'findByEmailWithSecrets'
-      | 'findByIdWithSecrets'
-      | 'create'
-      | 'setRefreshTokenHash'
-    >
-  >;
+  let queryBuilder: {
+    addSelect: jest.Mock;
+    where: jest.Mock;
+    getOne: jest.Mock;
+  };
+  let usersRepository: {
+    findOne: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+    update: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
 
   const user = {
     id: 'user-id-1',
@@ -27,19 +36,38 @@ describe('AuthService', () => {
     refreshTokenHash: null,
   } as User;
 
+  /** Hash del refresh persistido en la última llamada a update(). */
+  const lastStoredHash = (): string | null => {
+    const lastCall = usersRepository.update.mock.calls.at(-1) as [
+      string,
+      { refreshTokenHash: string | null },
+    ];
+    return lastCall[1].refreshTokenHash;
+  };
+
   beforeEach(async () => {
-    usersService = {
-      findByEmail: jest.fn(),
-      findByEmailWithSecrets: jest.fn(),
-      findByIdWithSecrets: jest.fn(),
-      create: jest.fn(),
-      setRefreshTokenHash: jest.fn(),
+    queryBuilder = {
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getOne: jest.fn(),
+    };
+    usersRepository = {
+      findOne: jest.fn(),
+      create: jest.fn().mockImplementation((data: Partial<User>) => data),
+      save: jest.fn().mockResolvedValue(user),
+      update: jest.fn(),
+      createQueryBuilder: jest.fn(() => queryBuilder),
     };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         AuthService,
-        { provide: UsersService, useValue: usersService },
+        TokenService,
+        RegisterUseCase,
+        LoginUseCase,
+        RefreshTokensUseCase,
+        LogoutUseCase,
+        { provide: getRepositoryToken(User), useValue: usersRepository },
         {
           provide: JwtService,
           useValue: {
@@ -74,12 +102,12 @@ describe('AuthService', () => {
 
   describe('register', () => {
     it('hashes the password with argon2 and never stores it in plain text', async () => {
-      usersService.findByEmail.mockResolvedValue(null);
-      usersService.create.mockResolvedValue(user);
+      usersRepository.findOne.mockResolvedValue(null);
 
       await authService.register(user.email, 'super-secret-password');
 
-      const [, storedPassword] = usersService.create.mock.calls[0];
+      const [{ password: storedPassword }] = usersRepository.create.mock
+        .calls[0] as [{ password: string }];
       expect(storedPassword).not.toBe('super-secret-password');
       await expect(
         argon2.verify(storedPassword, 'super-secret-password'),
@@ -87,7 +115,7 @@ describe('AuthService', () => {
     });
 
     it('rejects duplicate emails with 409', async () => {
-      usersService.findByEmail.mockResolvedValue(user);
+      usersRepository.findOne.mockResolvedValue(user);
 
       await expect(
         authService.register(user.email, 'super-secret-password'),
@@ -98,7 +126,7 @@ describe('AuthService', () => {
   describe('login', () => {
     it('returns tokens and persists the refresh hash on valid credentials', async () => {
       const password = 'super-secret-password';
-      usersService.findByEmailWithSecrets.mockResolvedValue({
+      queryBuilder.getOne.mockResolvedValue({
         ...user,
         password: await argon2.hash(password),
       });
@@ -107,19 +135,18 @@ describe('AuthService', () => {
 
       expect(tokens.accessToken).toBeDefined();
       expect(tokens.refreshToken).toBeDefined();
-      expect(usersService.setRefreshTokenHash).toHaveBeenCalledWith(
-        user.id,
-        expect.any(String),
-      );
+      expect(usersRepository.update).toHaveBeenCalledWith(user.id, {
+        refreshTokenHash: expect.any(String) as string,
+      });
     });
 
     it('returns the same 401 whether the email exists or the password is wrong', async () => {
-      usersService.findByEmailWithSecrets.mockResolvedValue(null);
+      queryBuilder.getOne.mockResolvedValue(null);
       const unknownEmailError = await authService
         .login('nobody@example.com', 'whatever-password')
         .catch((e: Error) => e);
 
-      usersService.findByEmailWithSecrets.mockResolvedValue({
+      queryBuilder.getOne.mockResolvedValue({
         ...user,
         password: await argon2.hash('the-right-password'),
       });
@@ -138,28 +165,27 @@ describe('AuthService', () => {
   describe('refreshTokens', () => {
     it('rotates the refresh token when the presented token matches the stored hash', async () => {
       const password = 'super-secret-password';
-      usersService.findByEmailWithSecrets.mockResolvedValue({
+      queryBuilder.getOne.mockResolvedValue({
         ...user,
         password: await argon2.hash(password),
       });
       const { refreshToken } = await authService.login(user.email, password);
-      const storedHash =
-        usersService.setRefreshTokenHash.mock.calls.at(-1)?.[1];
+      const storedHash = lastStoredHash();
 
-      usersService.findByIdWithSecrets.mockResolvedValue({
+      queryBuilder.getOne.mockResolvedValue({
         ...user,
         refreshTokenHash: storedHash,
-      } as User);
+      });
 
       const newTokens = await authService.refreshTokens(user.id, refreshToken);
-      const newHash = usersService.setRefreshTokenHash.mock.calls.at(-1)?.[1];
+      const newHash = lastStoredHash();
 
       expect(newTokens.refreshToken).not.toBe(refreshToken);
       expect(newHash).not.toBe(storedHash);
     });
 
     it('revokes the session on token reuse (valid signature, mismatched hash)', async () => {
-      usersService.findByIdWithSecrets.mockResolvedValue({
+      queryBuilder.getOne.mockResolvedValue({
         ...user,
         refreshTokenHash: 'hash-of-the-current-token',
       });
@@ -167,14 +193,13 @@ describe('AuthService', () => {
       await expect(
         authService.refreshTokens(user.id, 'an-old-rotated-token'),
       ).rejects.toBeInstanceOf(UnauthorizedException);
-      expect(usersService.setRefreshTokenHash).toHaveBeenCalledWith(
-        user.id,
-        null,
-      );
+      expect(usersRepository.update).toHaveBeenCalledWith(user.id, {
+        refreshTokenHash: null,
+      });
     });
 
     it('rejects when no refresh session exists', async () => {
-      usersService.findByIdWithSecrets.mockResolvedValue({
+      queryBuilder.getOne.mockResolvedValue({
         ...user,
         refreshTokenHash: null,
       });
@@ -188,10 +213,9 @@ describe('AuthService', () => {
   describe('logout', () => {
     it('clears the stored refresh token hash', async () => {
       await authService.logout(user.id);
-      expect(usersService.setRefreshTokenHash).toHaveBeenCalledWith(
-        user.id,
-        null,
-      );
+      expect(usersRepository.update).toHaveBeenCalledWith(user.id, {
+        refreshTokenHash: null,
+      });
     });
   });
 });

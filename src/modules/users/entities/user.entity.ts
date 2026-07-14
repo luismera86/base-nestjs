@@ -13,11 +13,6 @@ export class User extends BaseEntity {
   password: string;
 
   @Exclude()
-  @Column({
-    name: 'refresh_token_hash',
-    type: 'varchar',
-    nullable: true,
-    select: false,
-  })
+  @Column({ type: 'varchar', nullable: true, select: false })
   refreshTokenHash: string | null;
 }

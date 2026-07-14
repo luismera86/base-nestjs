@@ -99,6 +99,8 @@ En Docker, montar un volumen en `/app/logs` si se quiere persistir los archivos 
 
 `synchronize` está deshabilitado siempre: el schema se maneja con migraciones.
 
+Los nombres de columnas, joins y tablas de unión se generan en **snake_case** automáticamente (`SnakeNamingStrategy`): `createdAt` → `created_at` sin declarar `name` en cada `@Column`. Toda entidad debe extender `BaseEntity` (`src/common/entities/base.entity.ts`), que aporta `id` uuid, `createdAt` y `updatedAt`.
+
 ```bash
 # Generar una migración a partir de cambios en las entidades
 pnpm migration:generate src/database/migrations/NombreDelCambio
@@ -122,6 +124,16 @@ docker build -t base-nestjs .
 docker run --env-file .env -p 3000:3000 base-nestjs
 ```
 
+## Arquitectura de módulos
+
+Cada módulo sigue la cadena **Controller → Service → Use cases**:
+
+- **Use cases** (`use-cases/`): toda la lógica de negocio, fragmentada en una clase por operación con un único método `execute()`. Acceden a los datos inyectando el `Repository` de TypeORM directamente.
+- **Service**: fachada del módulo. No contiene lógica de negocio, solo canaliza los use cases (un método por use case).
+- **Controller**: llama al service, mantiene la estructura estándar de Nest (DTOs, decoradores, Swagger).
+
+La lógica de soporte compartida entre use cases de un módulo (p. ej. `TokenService` en auth) va en un provider aparte del módulo, no en el service.
+
 ## Estructura
 
 ```
@@ -129,11 +141,18 @@ src/
 ├── main.ts                  # bootstrap: helmet, CORS, pipes, versioning, swagger
 ├── app.module.ts            # config, DB, logger, throttler + providers globales
 ├── config/                  # validación Joi + configs tipadas por dominio
-├── common/                  # @Public, @CurrentUser, filtro de excepciones
+├── common/                  # @Public, @CurrentUser, BaseEntity, filtro de excepciones
 ├── database/                # módulo TypeORM, data-source del CLI, migraciones
 ├── modules/
 │   ├── users/               # entidad User + GET /users/me de ejemplo
+│   │   ├── use-cases/       # get-profile
+│   │   ├── users.service.ts # fachada
+│   │   └── ...
 │   └── auth/                # register/login/refresh/logout, estrategias, guards
+│       ├── use-cases/       # register, login, refresh-tokens, logout
+│       ├── token.service.ts # soporte compartido: emisión y hash de tokens
+│       ├── auth.service.ts  # fachada
+│       └── ...
 └── health/                  # GET /health con ping a la DB (Terminus)
 ```
 
@@ -141,5 +160,5 @@ src/
 
 1. Clonar / usar como template y renombrar en `package.json`.
 2. `cp .env.example .env` y generar secretos reales.
-3. Crear tus módulos en `src/modules/` siguiendo el patrón de `users`.
+3. Crear tus módulos en `src/modules/` siguiendo el patrón de `users`: lógica de negocio en `use-cases/`, service como fachada, controller llamando al service.
 4. Toda ruta nueva queda protegida por defecto; marca con `@Public()` solo lo que deba ser público.

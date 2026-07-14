@@ -1,17 +1,36 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { UsersModule } from '../users/users.module';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { User } from '../users/entities/user.entity';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { TokenService } from './token.service';
+import { LoginUseCase } from './use-cases/login.use-case';
+import { LogoutUseCase } from './use-cases/logout.use-case';
+import { RefreshTokensUseCase } from './use-cases/refresh-tokens.use-case';
+import { RegisterUseCase } from './use-cases/register.use-case';
 
 @Module({
   // JwtModule sin secret global: cada firma pasa secret/expiresIn explícitos
   // (access y refresh usan secrets distintos).
-  imports: [UsersModule, PassportModule, JwtModule.register({})],
+  imports: [
+    TypeOrmModule.forFeature([User]),
+    PassportModule,
+    JwtModule.register({}),
+  ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtRefreshStrategy],
+  providers: [
+    AuthService,
+    TokenService,
+    RegisterUseCase,
+    LoginUseCase,
+    RefreshTokensUseCase,
+    LogoutUseCase,
+    JwtStrategy,
+    JwtRefreshStrategy,
+  ],
 })
 export class AuthModule {}
