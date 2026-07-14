@@ -50,24 +50,35 @@ Validadas con Joi al arranque ([env.validation.ts](src/config/env.validation.ts)
 | `JWT_ACCESS_EXPIRES_IN` | TTL del access token | `15m` |
 | `JWT_REFRESH_SECRET` | Secreto del refresh token (mín. 32 chars, distinto del access) | requerida |
 | `JWT_REFRESH_EXPIRES_IN` | TTL del refresh token | `7d` |
+| `COOKIE_SECURE` | Flag `Secure` de las cookies de auth (solo HTTPS) | `true` en prod, `false` en dev |
 | `THROTTLE_TTL` / `THROTTLE_LIMIT` | Rate limit global (ventana ms / peticiones) | `60000` / `100` |
 | `SWAGGER_ENABLED` | Habilita `/docs` | `true` en dev, `false` en prod |
 | `LOG_LEVEL` | Nivel de log de pino | `info` |
 
 ## Autenticación
 
-Flujo JWT con **access token** (corto, 15 min) y **refresh token** (largo, 7 días) firmados con secretos distintos:
+Flujo JWT con **access token** (corto, 15 min) y **refresh token** (largo, 7 días) firmados con secretos distintos. Los tokens se entregan en **cookies `httpOnly`** (`access_token` y `refresh_token`), **nunca en el body**: si viajaran en la respuesta, un XSS podría llamar a `/refresh` y leer tokens frescos, anulando el beneficio de `httpOnly`.
 
-- `POST /api/v1/auth/register` — crea el usuario (password hasheado con **argon2id**) y devuelve tokens.
-- `POST /api/v1/auth/login` — devuelve tokens. El error es el mismo 401 exista o no el email (evita enumeración de usuarios).
-- `POST /api/v1/auth/refresh` — enviar el **refresh token** como `Authorization: Bearer`. Rota el par: el refresh anterior queda invalidado. Si se presenta un refresh ya rotado (firma válida, hash distinto), se asume robo y **se revoca la sesión completa**.
-- `POST /api/v1/auth/logout` — revoca el refresh token (requiere access token).
+- `POST /api/v1/auth/register` — crea el usuario (password hasheado con **argon2id**) y setea las cookies.
+- `POST /api/v1/auth/login` — setea las cookies. El error es el mismo 401 exista o no el email (evita enumeración de usuarios).
+- `POST /api/v1/auth/refresh` — lee el refresh de su cookie, rota el par y setea las nuevas. Si se presenta un refresh ya rotado (firma válida, hash distinto), se asume robo y **se revoca la sesión completa**.
+- `POST /api/v1/auth/logout` — revoca el refresh token y limpia las cookies.
+
+Propiedades de las cookies (`cookie.service.ts`):
+
+- `httpOnly` — el JS del navegador no puede leerlas (mitiga robo por XSS).
+- `SameSite=Lax` — no viajan en peticiones cross-site (mitiga CSRF).
+- `Secure` — solo HTTPS; activo en producción por defecto (`COOKIE_SECURE`).
+- La cookie de refresh tiene `Path=/api/v1/auth/refresh`: solo viaja al endpoint que la necesita.
+- El `maxAge` de cada cookie se deriva del TTL del JWT correspondiente.
+
+El frontend debe hacer sus peticiones con `credentials: 'include'` (CORS ya responde con `Access-Control-Allow-Credentials`). Las estrategias también aceptan `Authorization: Bearer` como fallback para clientes API/móviles.
 
 El guard JWT es **global**: toda ruta exige token salvo que esté marcada con `@Public()`. Para acceder al usuario autenticado: `@CurrentUser() user: AuthenticatedUser`.
 
 Del refresh token solo se guarda su **hash SHA-256** en la DB (columna `refresh_token_hash`), nunca el token en claro.
 
-> **Nota de diseño**: hay una sesión de refresh activa por usuario (simple y suficiente para la mayoría de APIs). Para multi-dispositivo, extender a una tabla `refresh_tokens` con `jti` por sesión. Los tokens se entregan en el body; para SPAs de mismo dominio se puede cambiar a cookies `httpOnly` tocando solo `auth.controller.ts`.
+> **Nota de diseño**: hay una sesión de refresh activa por usuario (simple y suficiente para la mayoría de APIs). Para multi-dispositivo, extender a una tabla `refresh_tokens` con `jti` por sesión.
 
 ## Seguridad incluida
 
@@ -151,6 +162,7 @@ src/
 │   └── auth/                # register/login/refresh/logout, estrategias, guards
 │       ├── use-cases/       # register, login, refresh-tokens, logout
 │       ├── token.service.ts # soporte compartido: emisión y hash de tokens
+│       ├── cookie.service.ts# entrega/limpieza de tokens en cookies httpOnly
 │       ├── auth.service.ts  # fachada
 │       └── ...
 └── health/                  # GET /health con ping a la DB (Terminus)

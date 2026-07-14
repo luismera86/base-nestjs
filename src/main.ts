@@ -2,6 +2,7 @@ import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import * as cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
@@ -14,11 +15,13 @@ async function bootstrap() {
   const config = app.get(ConfigService);
 
   app.use(helmet());
+  app.use(cookieParser());
 
   const corsOrigins = config.getOrThrow<string[]>('app.corsOrigins');
   app.enableCors({
     origin: corsOrigins.length > 0 ? corsOrigins : false,
-    credentials: false,
+    // Los tokens viajan en cookies: el frontend debe pedir con credentials: 'include'.
+    credentials: true,
   });
 
   // Rutas: /api/v1/... — /health queda fuera del prefijo para los probes de infra.
@@ -46,6 +49,7 @@ async function bootstrap() {
       .setDescription('Documentación de la API')
       .setVersion('1.0')
       .addBearerAuth()
+      .addCookieAuth('access_token')
       .build();
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('docs', app, document);

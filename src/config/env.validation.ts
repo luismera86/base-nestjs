@@ -35,6 +35,13 @@ export const envValidationSchema = Joi.object({
   THROTTLE_TTL: Joi.number().default(60000),
   THROTTLE_LIMIT: Joi.number().default(100),
 
+  // Flag Secure de las cookies de auth (solo HTTPS). Default: true en producción.
+  COOKIE_SECURE: Joi.boolean().when('NODE_ENV', {
+    is: 'production',
+    then: Joi.boolean().default(true),
+    otherwise: Joi.boolean().default(false),
+  }),
+
   SWAGGER_ENABLED: Joi.boolean().when('NODE_ENV', {
     is: 'production',
     then: Joi.boolean().default(false),

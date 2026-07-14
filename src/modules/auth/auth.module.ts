@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../users/entities/user.entity';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { CookieService } from './cookie.service';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { TokenService } from './token.service';
@@ -25,6 +26,7 @@ import { RegisterUseCase } from './use-cases/register.use-case';
   providers: [
     AuthService,
     TokenService,
+    CookieService,
     RegisterUseCase,
     LoginUseCase,
     RefreshTokensUseCase,

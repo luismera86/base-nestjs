@@ -1,11 +1,11 @@
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
+import * as cookieParser from 'cookie-parser';
 import { randomUUID } from 'node:crypto';
 import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
 
-type TokensBody = { accessToken: string; refreshToken: string };
 type UserBody = {
   email: string;
   password?: string;
@@ -13,16 +13,32 @@ type UserBody = {
 };
 type HealthBody = { status: string; details: { database: { status: string } } };
 
+/** Devuelve los headers Set-Cookie de la respuesta. */
+const setCookies = (res: request.Response): string[] => {
+  const header = res.headers['set-cookie'] as unknown;
+  if (Array.isArray(header)) return header as string[];
+  return typeof header === 'string' ? [header] : [];
+};
+
+/** Header Set-Cookie completo de una cookie por nombre. */
+const findCookie = (res: request.Response, name: string): string | undefined =>
+  setCookies(res).find((cookie) => cookie.startsWith(`${name}=`));
+
+/** Valor crudo de una cookie por nombre. */
+const cookieValue = (res: request.Response, name: string): string =>
+  findCookie(res, name)?.split(';')[0].split('=')[1] ?? '';
+
 /**
- * E2E del flujo de auth completo. Requiere el Postgres de docker-compose
- * levantado y las migraciones ejecutadas (pnpm migration:run).
+ * E2E del flujo de auth completo (tokens en cookies httpOnly).
+ * Requiere el Postgres de docker-compose levantado y las migraciones
+ * ejecutadas (pnpm migration:run).
  */
 describe('Auth (e2e)', () => {
   let app: NestExpressApplication;
   const email = `e2e-${randomUUID()}@example.com`;
   const password = 'a-very-long-password-123';
-  let accessToken: string;
-  let refreshToken: string;
+  let accessCookie: string;
+  let refreshCookie: string;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -31,6 +47,7 @@ describe('Auth (e2e)', () => {
 
     app = moduleRef.createNestApplication<NestExpressApplication>();
     // Replica la configuración de main.ts que afecta al routing/validación.
+    app.use(cookieParser());
     app.setGlobalPrefix('api', { exclude: ['health'] });
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
     app.useGlobalPipes(
@@ -47,17 +64,24 @@ describe('Auth (e2e)', () => {
     await app.close();
   });
 
-  it('POST /api/v1/auth/register → 201 sin exponer password ni refreshTokenHash', async () => {
+  it('POST /api/v1/auth/register → 201 con cookies httpOnly y sin tokens en el body', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({ email, password })
       .expect(201);
 
-    const body = res.body as TokensBody;
-    expect(body.accessToken).toBeDefined();
-    expect(body.refreshToken).toBeDefined();
-    expect(JSON.stringify(res.body)).not.toContain('password');
-    expect(JSON.stringify(res.body)).not.toContain('refreshTokenHash');
+    const accessSetCookie = findCookie(res, 'access_token');
+    const refreshSetCookie = findCookie(res, 'refresh_token');
+    expect(accessSetCookie).toContain('HttpOnly');
+    expect(accessSetCookie).toContain('SameSite=Lax');
+    expect(refreshSetCookie).toContain('HttpOnly');
+    // La cookie de refresh solo viaja al endpoint de refresh.
+    expect(refreshSetCookie).toContain('Path=/api/v1/auth/refresh');
+
+    const serialized = JSON.stringify(res.body);
+    expect(serialized).not.toContain('accessToken');
+    expect(serialized).not.toContain('refreshToken');
+    expect(serialized).not.toContain('password');
   });
 
   it('rechaza propiedades fuera del DTO (forbidNonWhitelisted) → 400', async () => {
@@ -79,25 +103,24 @@ describe('Auth (e2e)', () => {
     expect(typeof body.timestamp).toBe('string');
   });
 
-  it('POST /api/v1/auth/login OK → tokens', async () => {
+  it('POST /api/v1/auth/login OK → setea cookies de access y refresh', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email, password })
       .expect(200);
 
-    const body = res.body as TokensBody;
-    accessToken = body.accessToken;
-    refreshToken = body.refreshToken;
-    expect(accessToken).toBeDefined();
-    expect(refreshToken).toBeDefined();
+    accessCookie = cookieValue(res, 'access_token');
+    refreshCookie = cookieValue(res, 'refresh_token');
+    expect(accessCookie).toBeTruthy();
+    expect(refreshCookie).toBeTruthy();
   });
 
-  it('GET /api/v1/users/me sin token → 401; con token → 200 sin campos sensibles', async () => {
+  it('GET /api/v1/users/me sin cookie → 401; con cookie → 200 sin campos sensibles', async () => {
     await request(app.getHttpServer()).get('/api/v1/users/me').expect(401);
 
     const res = await request(app.getHttpServer())
       .get('/api/v1/users/me')
-      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Cookie', `access_token=${accessCookie}`)
       .expect(200);
 
     const body = res.body as UserBody;
@@ -106,20 +129,46 @@ describe('Auth (e2e)', () => {
     expect(body.refreshTokenHash).toBeUndefined();
   });
 
-  it('POST /api/v1/auth/refresh → rota tokens; el refresh viejo deja de servir', async () => {
+  it('mantiene el fallback Bearer para clientes API', async () => {
+    await request(app.getHttpServer())
+      .get('/api/v1/users/me')
+      .set('Authorization', `Bearer ${accessCookie}`)
+      .expect(200);
+  });
+
+  it('POST /api/v1/auth/refresh → rota cookies; el refresh viejo deja de servir', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/v1/auth/refresh')
-      .set('Authorization', `Bearer ${refreshToken}`)
+      .set('Cookie', `refresh_token=${refreshCookie}`)
       .expect(200);
 
-    const oldRefreshToken = refreshToken;
-    refreshToken = (res.body as TokensBody).refreshToken;
-    expect(refreshToken).not.toBe(oldRefreshToken);
+    const oldRefreshCookie = refreshCookie;
+    accessCookie = cookieValue(res, 'access_token');
+    refreshCookie = cookieValue(res, 'refresh_token');
+    expect(refreshCookie).toBeTruthy();
+    expect(refreshCookie).not.toBe(oldRefreshCookie);
 
     // Reusar el refresh anterior debe fallar (rotación + detección de reuso).
     await request(app.getHttpServer())
       .post('/api/v1/auth/refresh')
-      .set('Authorization', `Bearer ${oldRefreshToken}`)
+      .set('Cookie', `refresh_token=${oldRefreshCookie}`)
+      .expect(401);
+  });
+
+  it('POST /api/v1/auth/logout → 204, limpia cookies y revoca la sesión', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/v1/auth/logout')
+      .set('Cookie', `access_token=${accessCookie}`)
+      .expect(204);
+
+    // Las cookies se limpian (valor vacío).
+    expect(cookieValue(res, 'access_token')).toBe('');
+    expect(cookieValue(res, 'refresh_token')).toBe('');
+
+    // El refresh vigente quedó revocado en DB.
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', `refresh_token=${refreshCookie}`)
       .expect(401);
   });
 

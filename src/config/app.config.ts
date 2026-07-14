@@ -9,5 +9,9 @@ export default registerAs('app', () => ({
     .map((origin) => origin.trim())
     .filter(Boolean),
   swaggerEnabled: process.env.SWAGGER_ENABLED === 'true',
+  // Cookies con Secure (solo HTTPS). Default: activo en producción.
+  cookieSecure: process.env.COOKIE_SECURE
+    ? process.env.COOKIE_SECURE === 'true'
+    : process.env.NODE_ENV === 'production',
   logLevel: process.env.LOG_LEVEL ?? 'info',
 }));

@@ -4,7 +4,14 @@ import { PassportStrategy } from '@nestjs/passport';
 import type { Request } from 'express';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { AuthenticatedUserWithRefreshToken } from '../../../common/types/authenticated-user.type';
+import { cookieExtractor, REFRESH_TOKEN_COOKIE } from '../cookie.service';
 import { JwtPayload } from './jwt.strategy';
+
+// Cookie httpOnly primero (navegadores); Bearer como fallback (clientes API).
+const extractRefreshToken = ExtractJwt.fromExtractors([
+  cookieExtractor(REFRESH_TOKEN_COOKIE),
+  ExtractJwt.fromAuthHeaderAsBearerToken(),
+]);
 
 @Injectable()
 export class JwtRefreshStrategy extends PassportStrategy(
@@ -13,7 +20,7 @@ export class JwtRefreshStrategy extends PassportStrategy(
 ) {
   constructor(config: ConfigService) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: extractRefreshToken,
       ignoreExpiration: false,
       secretOrKey: config.getOrThrow<string>('jwt.refreshSecret'),
       // Necesitamos el token crudo para compararlo contra el hash guardado en DB.
@@ -25,7 +32,7 @@ export class JwtRefreshStrategy extends PassportStrategy(
     request: Request,
     payload: JwtPayload,
   ): AuthenticatedUserWithRefreshToken {
-    const refreshToken = ExtractJwt.fromAuthHeaderAsBearerToken()(request);
+    const refreshToken = extractRefreshToken(request);
     if (!refreshToken) {
       throw new UnauthorizedException();
     }
