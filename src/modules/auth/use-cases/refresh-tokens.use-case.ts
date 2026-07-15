@@ -17,7 +17,7 @@ export class RefreshTokensUseCase {
     const user = await this.usersRepository.findOne({
       where: { id: userId },
       // refreshTokenHash es select:false: hay que pedirla explícitamente.
-      select: { id: true, email: true, refreshTokenHash: true },
+      select: { id: true, email: true, role: true, refreshTokenHash: true },
     });
 
     if (!user || !user.refreshTokenHash) {
@@ -30,6 +30,6 @@ export class RefreshTokensUseCase {
       await this.usersRepository.update(user.id, { refreshTokenHash: null });
       throw new UnauthorizedException('errors.INVALID_REFRESH_TOKEN');
     }
-    return this.tokenService.issueTokens(user.id, user.email);
+    return this.tokenService.issueTokens(user.id, user.email, user.role);
   }
 }

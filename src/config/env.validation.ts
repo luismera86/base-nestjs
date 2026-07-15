@@ -44,6 +44,9 @@ export const envValidationSchema = Joi.object({
   MAIL_PASSWORD: Joi.string().allow('').default(''),
   MAIL_FROM: Joi.string().default('no-reply@example.com'),
 
+  // Tamaño máximo del body JSON (formato de la librería bytes: 100kb, 1mb...).
+  BODY_LIMIT: Joi.string().default('100kb'),
+
   FRONTEND_URL: Joi.string().uri().default('http://localhost:5173'),
   PASSWORD_RESET_TTL_MINUTES: Joi.number().positive().default(60),
 

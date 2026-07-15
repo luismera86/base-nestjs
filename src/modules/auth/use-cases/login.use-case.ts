@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as argon2 from 'argon2';
 import { Repository } from 'typeorm';
@@ -18,13 +22,23 @@ export class LoginUseCase {
     const user = await this.usersRepository.findOne({
       where: { email },
       // password es select:false: hay que pedirla explícitamente.
-      select: { id: true, email: true, password: true },
+      select: {
+        id: true,
+        email: true,
+        password: true,
+        role: true,
+        emailVerifiedAt: true,
+      },
     });
 
     // Mismo error exista o no el email: evita enumeración de usuarios.
     if (!user || !(await argon2.verify(user.password, password))) {
       throw new UnauthorizedException('errors.INVALID_CREDENTIALS');
     }
-    return this.tokenService.issueTokens(user.id, user.email);
+    // Solo tras validar la contraseña: no revela nada a terceros.
+    if (!user.emailVerifiedAt) {
+      throw new ForbiddenException('errors.EMAIL_NOT_VERIFIED');
+    }
+    return this.tokenService.issueTokens(user.id, user.email, user.role);
   }
 }

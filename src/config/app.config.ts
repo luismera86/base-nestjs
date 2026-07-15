@@ -13,6 +13,8 @@ export default registerAs('app', () => ({
   cookieSecure: process.env.COOKIE_SECURE
     ? process.env.COOKIE_SECURE === 'true'
     : process.env.NODE_ENV === 'production',
+  // Tamaño máximo del body JSON aceptado.
+  bodyLimit: process.env.BODY_LIMIT ?? '100kb',
   // Base del frontend: se usa para armar el link de recuperación de contraseña.
   frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',
   // Vigencia del token de recuperación de contraseña, en minutos.

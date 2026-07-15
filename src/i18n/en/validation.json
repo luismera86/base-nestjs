@@ -3,5 +3,9 @@
   "IS_STRING": "{property} must be a string",
   "MIN_LENGTH": "{property} must be at least {constraints.0} characters long",
   "MAX_LENGTH": "{property} must be at most {constraints.0} characters long",
-  "PASSWORD_WEAK": "{property} must contain at least one lowercase letter, one uppercase letter, one number and one special character"
+  "PASSWORD_WEAK": "{property} must contain at least one lowercase letter, one uppercase letter, one number and one special character",
+  "IS_INT": "{property} must be an integer",
+  "MIN": "{property} must be greater than or equal to {constraints.0}",
+  "MAX": "{property} must be less than or equal to {constraints.0}",
+  "IS_IN": "{property} must be one of: {constraints.0}"
 }

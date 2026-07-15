@@ -1,6 +1,6 @@
 # base-nestjs
 
-Plantilla base para APIs REST con [NestJS](https://nestjs.com) 11, pensada para arrancar proyectos con las piezas que toda API necesita ya resueltas y con la seguridad activada por defecto: autenticación JWT en cookies `httpOnly` con rotación de refresh tokens, PostgreSQL con migraciones, configuración validada al arranque, logging estructurado, rate limiting y arquitectura por use cases.
+Plantilla base para APIs REST con [NestJS](https://nestjs.com) 11, pensada para arrancar proyectos con las piezas que toda API necesita ya resueltas y con la seguridad activada por defecto: autenticación JWT en cookies `httpOnly` con rotación de refresh tokens, verificación de email, roles (RBAC), recuperación de contraseña por correo, PostgreSQL con migraciones, paginación estándar, i18n (es/en), configuración validada al arranque, logging estructurado, rate limiting y arquitectura por use cases.
 
 ## Stack
 
@@ -71,6 +71,7 @@ Validadas con Joi al arranque ([env.validation.ts](src/config/env.validation.ts)
 | `PORT` | Puerto HTTP | `3000` |
 | `API_PREFIX` | Prefijo global de rutas | `api` |
 | `CORS_ORIGINS` | Orígenes permitidos, separados por coma. Vacío = sin CORS | — |
+| `BODY_LIMIT` | Tamaño máximo del body JSON | `100kb` |
 | `DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_PASSWORD` / `DB_NAME` | Conexión a PostgreSQL | requeridas |
 | `DB_SSL` | Habilita SSL hacia la DB | `false` |
 | `JWT_ACCESS_SECRET` | Secreto del access token (mín. 32 chars) | requerida |
@@ -92,8 +93,9 @@ Flujo JWT con **access token** (corto, 15 min) y **refresh token** (largo, 7 dí
 
 | Endpoint | Qué hace |
 |---|---|
-| `POST /api/v1/auth/register` | Crea el usuario (password con **argon2id**) y setea las cookies. Exige contraseña fuerte (ver abajo) |
-| `POST /api/v1/auth/login` | Setea las cookies. Mismo 401 exista o no el email (evita enumeración de usuarios) |
+| `POST /api/v1/auth/register` | Crea el usuario (password con **argon2id**) y envía el correo de verificación. **No inicia sesión** |
+| `POST /api/v1/auth/verify-email` | Verifica el correo con el token recibido; habilita el login |
+| `POST /api/v1/auth/login` | Setea las cookies. Mismo 401 exista o no el email (evita enumeración); **403 si el correo no está verificado** |
 | `POST /api/v1/auth/refresh` | Lee el refresh de su cookie, **rota el par** y setea las nuevas cookies |
 | `POST /api/v1/auth/logout` | Revoca el refresh token y limpia las cookies |
 | `POST /api/v1/auth/forgot-password` | Envía por correo un enlace con token para recuperar la contraseña |
@@ -102,6 +104,20 @@ Flujo JWT con **access token** (corto, 15 min) y **refresh token** (largo, 7 dí
 **Rotación con detección de reuso**: cada refresh invalida el token anterior. Si se presenta un refresh ya rotado (firma válida pero hash distinto al guardado), se asume robo y **se revoca la sesión completa** — el refresh vigente también deja de servir.
 
 Del refresh token solo se guarda su **hash SHA-256** en la DB (columna `refresh_token_hash`), nunca el token en claro.
+
+### Verificación de email
+
+El registro **no emite sesión**: crea el usuario con un token de verificación (en DB solo su hash SHA-256) y envía el correo con el enlace `${FRONTEND_URL}/verify-email?token=...`. El **login queda bloqueado (403)** hasta que el correo se verifique con `POST /auth/verify-email`. El chequeo de verificación corre después de validar la contraseña, así no revela nada a terceros. El token es de un solo uso.
+
+### Roles y permisos (RBAC)
+
+Autorización mínima lista para extender:
+
+- `User.role` (`admin` | `user`, default `user`) — enum en [role.enum.ts](src/common/enums/role.enum.ts).
+- El rol viaja **dentro del JWT**: sin consulta a DB por request. Un cambio de rol aplica al renovar el token (máx. 15 min) o al re-loguear.
+- `@Roles(Role.ADMIN)` en cualquier handler/controller + [RolesGuard](src/common/guards/roles.guard.ts) global (orden: rate limit → auth → roles). Sin `@Roles`, basta estar autenticado.
+- Ejemplo funcionando: `GET /api/v1/users` (listado paginado, solo admin).
+- El primer admin se promueve por seed o SQL (`UPDATE users SET role = 'admin' WHERE email = ...`); el registro público siempre crea `user` (el DTO no acepta rol: sin mass-assignment).
 
 ### Recuperación de contraseña
 
@@ -142,9 +158,31 @@ me(@CurrentUser() user: AuthenticatedUser) { ... }
 
 > **Nota de diseño**: hay una sesión de refresh activa por usuario (simple y suficiente para la mayoría de APIs). Para multi-dispositivo, extender a una tabla `refresh_tokens` con `jti` por sesión.
 
+## Paginación estándar
+
+Todo listado usa el mismo patrón, definido en `src/common/dto/`:
+
+- [`PaginationQueryDto`](src/common/dto/pagination-query.dto.ts): `?page=2&limit=20&order=desc` — `limit` con tope 100, valores validados y con defaults.
+- [`Paginated<T>`](src/common/dto/paginated.dto.ts): respuesta uniforme `{ items, total, page, limit, pages }`.
+
+```ts
+// En el use case:
+const [items, total] = await this.repo.findAndCount({
+  skip: query.skip,
+  take: query.limit,
+  order: { createdAt: query.order === 'asc' ? 'ASC' : 'DESC' },
+});
+return new Paginated(items, total, query);
+```
+
+Ejemplo funcionando: `GET /api/v1/users?page=1&limit=20` (solo admin).
+
 ## Seguridad incluida
 
 - **Tokens en cookies `httpOnly`** con `SameSite=Lax` y `Secure` en producción.
+- **Verificación de email obligatoria** antes de poder iniciar sesión.
+- **Solo se parsea body JSON** (sin parser `urlencoded`): un `<form>` cross-site llega con body vacío y se rechaza — cierra el login-CSRF. Límite de tamaño de body explícito (`BODY_LIMIT`).
+- **RBAC** con guard global de roles (`@Roles`).
 - **helmet** (headers de seguridad) y **CORS** restringido a `CORS_ORIGINS`.
 - **Rate limiting** global (`@nestjs/throttler`) + límite estricto de 5/min en los endpoints de auth (blanco típico de fuerza bruta).
 - **ValidationPipe global** (`I18nValidationPipe`) con `whitelist` + `forbidNonWhitelisted`: cualquier propiedad fuera del DTO rechaza la petición.
@@ -289,8 +327,11 @@ src/
 ├── app.module.ts            # config, DB, logger, throttler + providers globales
 ├── config/                  # validación Joi + configs tipadas por dominio
 ├── common/
-│   ├── decorators/          # @Public, @CurrentUser, @IsStrongPassword
+│   ├── decorators/          # @Public, @CurrentUser, @Roles, @IsStrongPassword
+│   ├── dto/                 # PaginationQueryDto, Paginated<T>
 │   ├── entities/            # BaseEntity (id, timestamps, soft delete)
+│   ├── enums/               # Role
+│   ├── guards/              # RolesGuard (global)
 │   └── filters/             # filtro global de excepciones + validación i18n
 ├── i18n/                    # traducciones de errores y validación (es, en)
 ├── database/                # módulo TypeORM, data-source del CLI, migraciones
@@ -298,15 +339,16 @@ src/
 │   ├── mail/                # MailModule global: envío vía nodemailer
 │   │   └── templates/       # templates de correo + traducciones (i18n/es|en)
 │   ├── users/
-│   │   ├── entities/        # entidad User
-│   │   ├── use-cases/       # get-profile
+│   │   ├── entities/        # entidad User (role, verificación, tokens)
+│   │   ├── use-cases/       # get-profile, list-users (paginado, admin)
 │   │   ├── users.service.ts # fachada
 │   │   └── users.controller.ts
 │   └── auth/
-│       ├── dto/             # register, login
+│       ├── dto/             # register, login, verify-email, forgot/reset-password
 │       ├── guards/          # jwt, jwt-refresh
 │       ├── strategies/      # extracción cookie-first con fallback Bearer
-│       ├── use-cases/       # register, login, refresh-tokens, logout
+│       ├── use-cases/       # register, verify-email, login, refresh, logout,
+│       │                    # forgot-password, reset-password
 │       ├── token.service.ts # soporte: emisión y hash de tokens
 │       ├── cookie.service.ts# soporte: entrega/limpieza de cookies httpOnly
 │       ├── auth.service.ts  # fachada

@@ -1,9 +1,14 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import * as argon2 from 'argon2';
+import { Role } from '../../common/enums/role.enum';
 import { MailService } from '../mail/mail.service';
 import { User } from '../users/entities/user.entity';
 import { AuthService } from './auth.service';
@@ -14,6 +19,7 @@ import { LogoutUseCase } from './use-cases/logout.use-case';
 import { RefreshTokensUseCase } from './use-cases/refresh-tokens.use-case';
 import { RegisterUseCase } from './use-cases/register.use-case';
 import { ResetPasswordUseCase } from './use-cases/reset-password.use-case';
+import { VerifyEmailUseCase } from './use-cases/verify-email.use-case';
 
 // Se testea a través de la fachada AuthService con los use cases reales:
 // valida el wiring completo del módulo, solo se mockea la infraestructura.
@@ -31,6 +37,8 @@ describe('AuthService', () => {
     id: 'user-id-1',
     email: 'test@example.com',
     password: 'hashed',
+    role: Role.USER,
+    emailVerifiedAt: new Date(),
     refreshTokenHash: null,
   } as User;
 
@@ -62,6 +70,7 @@ describe('AuthService', () => {
         LogoutUseCase,
         ForgotPasswordUseCase,
         ResetPasswordUseCase,
+        VerifyEmailUseCase,
         { provide: getRepositoryToken(User), useValue: usersRepository },
         { provide: MailService, useValue: mailService },
         {
@@ -119,6 +128,42 @@ describe('AuthService', () => {
         authService.register(user.email, 'super-secret-password'),
       ).rejects.toBeInstanceOf(ConflictException);
     });
+
+    it('stores only the verification token hash and emails the raw token', async () => {
+      usersRepository.findOne.mockResolvedValue(null);
+
+      await authService.register(user.email, 'super-secret-password');
+
+      const [{ emailVerificationTokenHash }] = usersRepository.create.mock
+        .calls[0] as [{ emailVerificationTokenHash: string }];
+      const [mail] = mailService.sendMail.mock.calls[0] as [{ text: string }];
+      const rawToken = /token=([a-f0-9]+)/.exec(mail.text)?.[1] ?? '';
+
+      expect(rawToken).toHaveLength(64);
+      expect(emailVerificationTokenHash).toBeDefined();
+      expect(emailVerificationTokenHash).not.toBe(rawToken);
+    });
+  });
+
+  describe('verifyEmail', () => {
+    it('marks the email as verified and consumes the token', async () => {
+      usersRepository.findOne.mockResolvedValue(user);
+
+      await authService.verifyEmail('a-valid-token');
+
+      expect(usersRepository.update).toHaveBeenCalledWith(user.id, {
+        emailVerifiedAt: expect.any(Date) as Date,
+        emailVerificationTokenHash: null,
+      });
+    });
+
+    it('rejects unknown tokens with 401', async () => {
+      usersRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        authService.verifyEmail('bogus-token'),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
   });
 
   describe('login', () => {
@@ -136,6 +181,18 @@ describe('AuthService', () => {
       expect(usersRepository.update).toHaveBeenCalledWith(user.id, {
         refreshTokenHash: expect.any(String) as string,
       });
+    });
+
+    it('blocks login with 403 when the email is not verified', async () => {
+      usersRepository.findOne.mockResolvedValue({
+        ...user,
+        emailVerifiedAt: null,
+        password: await argon2.hash('super-secret-password'),
+      });
+
+      await expect(
+        authService.login(user.email, 'super-secret-password'),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
     it('returns the same 401 whether the email exists or the password is wrong', async () => {

@@ -3,5 +3,9 @@
   "IS_STRING": "{property} debe ser una cadena de texto",
   "MIN_LENGTH": "{property} debe tener al menos {constraints.0} caracteres",
   "MAX_LENGTH": "{property} debe tener como máximo {constraints.0} caracteres",
-  "PASSWORD_WEAK": "{property} debe contener al menos una minúscula, una mayúscula, un número y un carácter especial"
+  "PASSWORD_WEAK": "{property} debe contener al menos una minúscula, una mayúscula, un número y un carácter especial",
+  "IS_INT": "{property} debe ser un número entero",
+  "MIN": "{property} debe ser mayor o igual a {constraints.0}",
+  "MAX": "{property} debe ser menor o igual a {constraints.0}",
+  "IS_IN": "{property} debe ser uno de: {constraints.0}"
 }

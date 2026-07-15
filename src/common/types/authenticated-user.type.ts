@@ -1,9 +1,12 @@
+import { Role } from '../enums/role.enum';
+
 /**
  * Payload que viaja en request.user tras validar el access token.
  */
 export type AuthenticatedUser = {
   id: string;
   email: string;
+  role: Role;
 };
 
 /**

@@ -1,4 +1,10 @@
 {
+  "emailVerification": {
+    "subject": "Verifica tu correo",
+    "intro": "Gracias por registrarte. Confirma tu correo para activar tu cuenta:",
+    "cta": "Verificar correo",
+    "ignore": "Si no creaste esta cuenta, puedes ignorar este correo."
+  },
   "passwordReset": {
     "subject": "Recuperación de contraseña",
     "intro": "Recibimos una solicitud para restablecer tu contraseña. El enlace es válido por {ttlMinutes} minutos:",

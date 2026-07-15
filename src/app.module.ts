@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { AcceptLanguageResolver, I18nModule } from 'nestjs-i18n';
 import { LoggerModule } from 'nestjs-pino';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { RolesGuard } from './common/guards/roles.guard';
 import { createI18nValidationFilter } from './common/filters/i18n-validation.filter';
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
@@ -61,9 +62,10 @@ import { UsersModule } from './modules/users/users.module';
     HealthModule,
   ],
   providers: [
-    // Orden de guards: primero rate limit, luego auth.
+    // Orden de guards: rate limit → autenticación → autorización por roles.
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
     // Nest evalúa los filtros en orden inverso al registro: el de validación
     // (más específico) debe ir DESPUÉS del catch-all para tener prioridad.
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

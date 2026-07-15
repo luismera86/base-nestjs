@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import type { StringValue } from 'ms';
 import { createHash, randomUUID } from 'node:crypto';
 import { Repository } from 'typeorm';
+import { Role } from '../../common/enums/role.enum';
 import { User } from '../users/entities/user.entity';
 import { AuthTokensDto } from './dto/auth-tokens.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
@@ -20,8 +21,12 @@ export class TokenService {
   ) {}
 
   /** Emite access + refresh y rota el hash del refresh guardado en DB. */
-  async issueTokens(userId: string, email: string): Promise<AuthTokensDto> {
-    const payload: JwtPayload = { sub: userId, email };
+  async issueTokens(
+    userId: string,
+    email: string,
+    role: Role,
+  ): Promise<AuthTokensDto> {
+    const payload: JwtPayload = { sub: userId, email, role };
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {

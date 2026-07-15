@@ -1,6 +1,7 @@
 import { Exclude } from 'class-transformer';
 import { Column, Entity } from 'typeorm';
 import { BaseEntity } from '../../../common/entities/base.entity';
+import { Role } from '../../../common/enums/role.enum';
 
 @Entity('users')
 export class User extends BaseEntity {
@@ -11,6 +12,17 @@ export class User extends BaseEntity {
   @Exclude()
   @Column({ select: false })
   password: string;
+
+  @Column({ type: 'enum', enum: Role, default: Role.USER })
+  role: Role;
+
+  // null = correo aún no verificado (bloquea el login).
+  @Column({ type: 'timestamp', nullable: true })
+  emailVerifiedAt: Date | null;
+
+  @Exclude()
+  @Column({ type: 'varchar', nullable: true, select: false })
+  emailVerificationTokenHash: string | null;
 
   @Exclude()
   @Column({ type: 'varchar', nullable: true, select: false })

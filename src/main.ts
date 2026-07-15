@@ -2,20 +2,30 @@ import { VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import * as compression from 'compression';
 import * as cookieParser from 'cookie-parser';
+import { json } from 'express';
 import helmet from 'helmet';
 import { I18nValidationPipe } from 'nestjs-i18n';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // bodyParser: false → se registra SOLO el parser JSON (abajo). Sin el parser
+  // urlencoded, un <form> cross-site (simple request, sin preflight de CORS)
+  // llega con body vacío y la validación lo rechaza: cierra el login-CSRF.
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    bodyParser: false,
+  });
   const logger = app.get(Logger);
   app.useLogger(logger);
 
   const config = app.get(ConfigService);
 
   app.use(helmet());
+  app.use(compression());
+  app.use(json({ limit: config.getOrThrow<string>('app.bodyLimit') }));
   app.use(cookieParser());
 
   const corsOrigins = config.getOrThrow<string[]>('app.corsOrigins');

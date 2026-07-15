@@ -15,6 +15,7 @@ import { LogoutUseCase } from './use-cases/logout.use-case';
 import { RefreshTokensUseCase } from './use-cases/refresh-tokens.use-case';
 import { RegisterUseCase } from './use-cases/register.use-case';
 import { ResetPasswordUseCase } from './use-cases/reset-password.use-case';
+import { VerifyEmailUseCase } from './use-cases/verify-email.use-case';
 
 @Module({
   // JwtModule sin secret global: cada firma pasa secret/expiresIn explícitos
@@ -35,6 +36,7 @@ import { ResetPasswordUseCase } from './use-cases/reset-password.use-case';
     LogoutUseCase,
     ForgotPasswordUseCase,
     ResetPasswordUseCase,
+    VerifyEmailUseCase,
     JwtStrategy,
     JwtRefreshStrategy,
   ],

@@ -22,6 +22,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 
 // Los endpoints de auth son el blanco de fuerza bruta: límite estricto (5/min).
@@ -38,13 +39,21 @@ export class AuthController {
 
   @Public()
   @Post('register')
-  @ApiOperation({ summary: 'Registro: setea cookies httpOnly con los tokens' })
-  async register(
-    @Body() dto: RegisterDto,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<void> {
-    const tokens = await this.authService.register(dto.email, dto.password);
-    this.cookieService.setAuthCookies(res, tokens);
+  @ApiOperation({
+    summary: 'Registro: envía un correo de verificación (no inicia sesión)',
+  })
+  async register(@Body() dto: RegisterDto): Promise<void> {
+    await this.authService.register(dto.email, dto.password);
+  }
+
+  @Public()
+  @Post('verify-email')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Verifica el correo con el token recibido; habilita el login',
+  })
+  async verifyEmail(@Body() dto: VerifyEmailDto): Promise<void> {
+    await this.authService.verifyEmail(dto.token);
   }
 
   @Public()

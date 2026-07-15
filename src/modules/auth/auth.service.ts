@@ -6,6 +6,7 @@ import { LogoutUseCase } from './use-cases/logout.use-case';
 import { RefreshTokensUseCase } from './use-cases/refresh-tokens.use-case';
 import { RegisterUseCase } from './use-cases/register.use-case';
 import { ResetPasswordUseCase } from './use-cases/reset-password.use-case';
+import { VerifyEmailUseCase } from './use-cases/verify-email.use-case';
 
 /**
  * Fachada del módulo: canaliza los use cases.
@@ -20,10 +21,15 @@ export class AuthService {
     private readonly logoutUseCase: LogoutUseCase,
     private readonly forgotPasswordUseCase: ForgotPasswordUseCase,
     private readonly resetPasswordUseCase: ResetPasswordUseCase,
+    private readonly verifyEmailUseCase: VerifyEmailUseCase,
   ) {}
 
-  register(email: string, password: string): Promise<AuthTokensDto> {
+  register(email: string, password: string): Promise<void> {
     return this.registerUseCase.execute(email, password);
+  }
+
+  verifyEmail(token: string): Promise<void> {
+    return this.verifyEmailUseCase.execute(token);
   }
 
   login(email: string, password: string): Promise<AuthTokensDto> {
