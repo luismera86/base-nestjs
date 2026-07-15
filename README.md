@@ -63,7 +63,7 @@ El health check queda en `http://localhost:3000/health` (fuera del prefijo de la
 
 ## Variables de entorno
 
-Validadas con Joi al arranque ([env.validation.ts](src/config/env.validation.ts)): si falta una obligatoria o hay un valor inválido, la app **no arranca** (fail-fast con mensaje claro).
+Validadas con **Zod** al arranque ([env.validation.ts](src/config/env.validation.ts)): si falta una obligatoria o hay un valor inválido, la app **no arranca** (fail-fast listando todos los errores). El schema es la única fuente de verdad: coerción de tipos (`PORT` llega como number, `DB_SSL` como boolean), defaults condicionados a `NODE_ENV` y reglas cruzadas (los secretos JWT deben ser distintos). El tipo `Env` se infiere del schema (`z.infer`).
 
 | Variable | Descripción | Default |
 |---|---|---|
@@ -325,7 +325,7 @@ Los logs de archivo se escriben en `/app/logs`: montar un volumen ahí si se qui
 src/
 ├── main.ts                  # bootstrap: helmet, cookies, CORS, pipes, versioning, swagger
 ├── app.module.ts            # config, DB, logger, throttler + providers globales
-├── config/                  # validación Joi + configs tipadas por dominio
+├── config/                  # validación Zod del env + configs tipadas por dominio
 ├── common/
 │   ├── decorators/          # @Public, @CurrentUser, @Roles, @IsStrongPassword
 │   ├── dto/                 # PaginationQueryDto, Paginated<T>

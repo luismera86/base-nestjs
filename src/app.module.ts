@@ -15,10 +15,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { createI18nValidationFilter } from './common/filters/i18n-validation.filter';
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
-import {
-  envValidationOptions,
-  envValidationSchema,
-} from './config/env.validation';
+import { validateEnv } from './config/env.validation';
 import jwtConfig from './config/jwt.config';
 import { loggerFactory } from './config/logger.config';
 import mailConfig from './config/mail.config';
@@ -35,8 +32,7 @@ import { UsersModule } from './modules/users/users.module';
     ConfigModule.forRoot({
       isGlobal: true,
       load: [appConfig, databaseConfig, jwtConfig, throttlerConfig, mailConfig],
-      validationSchema: envValidationSchema,
-      validationOptions: envValidationOptions,
+      validate: validateEnv,
     }),
     LoggerModule.forRootAsync({
       inject: [ConfigService],
