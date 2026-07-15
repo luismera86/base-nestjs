@@ -1,0 +1,10 @@
+{
+  // Usar el TypeScript del proyecto (no el que trae el editor): mismas
+  // reglas y versión que `pnpm build` — evita falsos errores en el editor.
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // ESLint con la config flat del proyecto, validando TS.
+  "eslint.useFlatConfig": true,
+  "eslint.validate": ["typescript"]
+}

@@ -5,6 +5,7 @@ import { LoginUseCase } from './use-cases/login.use-case';
 import { LogoutUseCase } from './use-cases/logout.use-case';
 import { RefreshTokensUseCase } from './use-cases/refresh-tokens.use-case';
 import { RegisterUseCase } from './use-cases/register.use-case';
+import { ResendVerificationUseCase } from './use-cases/resend-verification.use-case';
 import { ResetPasswordUseCase } from './use-cases/reset-password.use-case';
 import { VerifyEmailUseCase } from './use-cases/verify-email.use-case';
 
@@ -22,6 +23,7 @@ export class AuthService {
     private readonly forgotPasswordUseCase: ForgotPasswordUseCase,
     private readonly resetPasswordUseCase: ResetPasswordUseCase,
     private readonly verifyEmailUseCase: VerifyEmailUseCase,
+    private readonly resendVerificationUseCase: ResendVerificationUseCase,
   ) {}
 
   register(email: string, password: string): Promise<void> {
@@ -30,6 +32,10 @@ export class AuthService {
 
   verifyEmail(token: string): Promise<void> {
     return this.verifyEmailUseCase.execute(token);
+  }
+
+  resendVerification(email: string): Promise<void> {
+    return this.resendVerificationUseCase.execute(email);
   }
 
   login(email: string, password: string): Promise<AuthTokensDto> {

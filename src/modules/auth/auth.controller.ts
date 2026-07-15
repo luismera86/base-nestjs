@@ -21,6 +21,7 @@ import { CookieService } from './cookie.service';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
@@ -54,6 +55,17 @@ export class AuthController {
   })
   async verifyEmail(@Body() dto: VerifyEmailDto): Promise<void> {
     await this.authService.verifyEmail(dto.token);
+  }
+
+  @Public()
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Reenvía el correo de verificación (invalida el enlace anterior)',
+  })
+  async resendVerification(@Body() dto: ResendVerificationDto): Promise<void> {
+    // Siempre 204, exista o no el email (evita enumeración de usuarios).
+    await this.authService.resendVerification(dto.email);
   }
 
   @Public()

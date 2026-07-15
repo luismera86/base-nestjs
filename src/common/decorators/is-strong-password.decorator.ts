@@ -3,7 +3,7 @@ import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { i18nValidationMessage } from 'nestjs-i18n';
 
 // Al menos una minúscula, una mayúscula, un dígito y un carácter especial.
-const PASSWORD_STRENGTH =
+export const PASSWORD_STRENGTH =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).*$/;
 
 /**

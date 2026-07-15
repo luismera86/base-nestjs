@@ -18,6 +18,7 @@ import { LoginUseCase } from './use-cases/login.use-case';
 import { LogoutUseCase } from './use-cases/logout.use-case';
 import { RefreshTokensUseCase } from './use-cases/refresh-tokens.use-case';
 import { RegisterUseCase } from './use-cases/register.use-case';
+import { ResendVerificationUseCase } from './use-cases/resend-verification.use-case';
 import { ResetPasswordUseCase } from './use-cases/reset-password.use-case';
 import { VerifyEmailUseCase } from './use-cases/verify-email.use-case';
 
@@ -71,6 +72,7 @@ describe('AuthService', () => {
         ForgotPasswordUseCase,
         ResetPasswordUseCase,
         VerifyEmailUseCase,
+        ResendVerificationUseCase,
         { provide: getRepositoryToken(User), useValue: usersRepository },
         { provide: MailService, useValue: mailService },
         {
@@ -142,6 +144,33 @@ describe('AuthService', () => {
       expect(rawToken).toHaveLength(64);
       expect(emailVerificationTokenHash).toBeDefined();
       expect(emailVerificationTokenHash).not.toBe(rawToken);
+    });
+  });
+
+  describe('resendVerification', () => {
+    it('regenera el token (invalida el anterior) y reenvía solo si el usuario no está verificado', async () => {
+      usersRepository.findOne.mockResolvedValue({
+        ...user,
+        emailVerifiedAt: null,
+      });
+
+      await authService.resendVerification(user.email);
+
+      expect(usersRepository.update).toHaveBeenCalledWith(user.id, {
+        emailVerificationTokenHash: expect.any(String) as string,
+      });
+      expect(mailService.sendMail).toHaveBeenCalledTimes(1);
+    });
+
+    it('no hace nada si el usuario ya está verificado o no existe', async () => {
+      usersRepository.findOne.mockResolvedValue(user); // ya verificado
+      await authService.resendVerification(user.email);
+
+      usersRepository.findOne.mockResolvedValue(null); // no existe
+      await authService.resendVerification('nobody@example.com');
+
+      expect(usersRepository.update).not.toHaveBeenCalled();
+      expect(mailService.sendMail).not.toHaveBeenCalled();
     });
   });
 

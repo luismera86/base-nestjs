@@ -31,6 +31,8 @@ import { UsersModule } from './modules/users/users.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      // Los e2e usan su propia DB y secretos dummy (.env.test).
+      envFilePath: process.env.NODE_ENV === 'test' ? '.env.test' : '.env',
       load: [appConfig, databaseConfig, jwtConfig, throttlerConfig, mailConfig],
       validate: validateEnv,
     }),

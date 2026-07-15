@@ -48,7 +48,10 @@ docker compose up -d
 # 4. Migraciones
 pnpm migration:run
 
-# 5. Arrancar en modo desarrollo
+# 5. Primer admin (lee SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD del .env)
+pnpm seed
+
+# 6. Arrancar en modo desarrollo
 pnpm start:dev
 ```
 
@@ -95,6 +98,7 @@ Flujo JWT con **access token** (corto, 15 min) y **refresh token** (largo, 7 dí
 |---|---|
 | `POST /api/v1/auth/register` | Crea el usuario (password con **argon2id**) y envía el correo de verificación. **No inicia sesión** |
 | `POST /api/v1/auth/verify-email` | Verifica el correo con el token recibido; habilita el login |
+| `POST /api/v1/auth/resend-verification` | Reenvía el correo de verificación; invalida el enlace anterior |
 | `POST /api/v1/auth/login` | Setea las cookies. Mismo 401 exista o no el email (evita enumeración); **403 si el correo no está verificado** |
 | `POST /api/v1/auth/refresh` | Lee el refresh de su cookie, **rota el par** y setea las nuevas cookies |
 | `POST /api/v1/auth/logout` | Revoca el refresh token y limpia las cookies |
@@ -109,6 +113,8 @@ Del refresh token solo se guarda su **hash SHA-256** en la DB (columna `refresh_
 
 El registro **no emite sesión**: crea el usuario con un token de verificación (en DB solo su hash SHA-256) y envía el correo con el enlace `${FRONTEND_URL}/verify-email?token=...`. El **login queda bloqueado (403)** hasta que el correo se verifique con `POST /auth/verify-email`. El chequeo de verificación corre después de validar la contraseña, así no revela nada a terceros. El token es de un solo uso.
 
+Si el correo se pierde, `POST /auth/resend-verification` genera un token nuevo (el enlace anterior queda invalidado) y reenvía. Responde **204 siempre** — exista o no el email, esté o no verificado — para no permitir enumeración de usuarios.
+
 ### Roles (RBAC)
 
 Autorización simple por roles, lista para extender:
@@ -117,7 +123,7 @@ Autorización simple por roles, lista para extender:
 - El rol viaja **dentro del JWT**: sin consulta a DB por request. Un cambio de rol aplica al renovar el token (máx. 15 min) o al re-loguear.
 - `@Roles(Role.ADMIN)` en cualquier handler/controller + [RolesGuard](src/common/guards/roles.guard.ts) global (orden: rate limit → auth → roles). Sin `@Roles`, basta estar autenticado.
 - Ejemplo funcionando: `GET /api/v1/users` (listado paginado, solo admin).
-- El primer admin se promueve por seed o SQL (`UPDATE users SET role = 'admin' WHERE email = ...`); el registro público siempre crea `user` (el DTO no acepta rol: sin mass-assignment).
+- El primer admin se crea con **`pnpm seed`** ([seed.ts](src/database/seed.ts)): lee `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` del `.env`, valida la política de contraseñas y es **idempotente** (si el usuario existe lo promueve; si ya es admin, no hace nada). El registro público siempre crea `user` (el DTO no acepta rol: sin mass-assignment).
 
 ### Recuperación de contraseña
 
@@ -303,10 +309,13 @@ Para agregar un error nuevo: sumar la clave en `es/errors.json` **y** `en/errors
 
 ```bash
 pnpm test        # unit: flujo de auth completo vía la fachada (hashing, login
-                 # no-enumerable, rotación, detección de reuso)
-pnpm test:e2e    # e2e con HTTP y DB reales: cookies httpOnly, rotación, logout,
-                 # validación de DTOs, health (requiere docker compose + migraciones)
+                 # no-enumerable, rotación, detección de reuso), guard de roles
+                 # y filtro de excepciones
+pnpm test:e2e    # e2e con HTTP y DB reales: cookies httpOnly, verificación de
+                 # email, roles, paginación, recuperación de contraseña, health
 ```
+
+Los e2e usan su **propia base** (`base_nestjs_test`, config en [.env.test](.env.test)): `pnpm test:e2e` la crea y migra solo si hace falta ([setup-e2e-db.ts](test/setup-e2e-db.ts)) y trunca las tablas al inicio de cada corrida — la DB de desarrollo nunca se toca (hay cinturón de seguridad: si el nombre de la DB no contiene `test`, el suite aborta).
 
 ## Docker (producción)
 

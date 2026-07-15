@@ -100,6 +100,17 @@ describe('Auth (e2e)', () => {
       }),
     );
     await app.init();
+
+    // DB de test limpia en cada corrida. Cinturón de seguridad: solo si
+    // efectivamente estamos sobre la base de test (.env.test).
+    const dataSource = app.get(DataSource);
+    const dbName = String(dataSource.options.database);
+    if (!dbName.includes('test')) {
+      throw new Error(
+        `Los e2e deben correr sobre la DB de test, no "${dbName}"`,
+      );
+    }
+    await dataSource.query('TRUNCATE TABLE "users" CASCADE');
   });
 
   afterAll(async () => {
@@ -107,6 +118,8 @@ describe('Auth (e2e)', () => {
   });
 
   describe('registro y verificación de email', () => {
+    let verificationToken: string;
+
     it('POST /api/v1/auth/register → 201 sin sesión y envía el correo de verificación', async () => {
       sentMails.length = 0;
       const res = await request(app.getHttpServer())
@@ -121,7 +134,8 @@ describe('Auth (e2e)', () => {
 
       expect(sentMails).toHaveLength(1);
       expect(sentMails[0].to).toBe(email);
-      expect(tokenFromMail(sentMails[0])).toHaveLength(64);
+      verificationToken = tokenFromMail(sentMails[0]);
+      expect(verificationToken).toHaveLength(64);
     });
 
     it('rechaza propiedades fuera del DTO (forbidNonWhitelisted) → 400', async () => {
@@ -152,11 +166,48 @@ describe('Auth (e2e)', () => {
         .expect(401);
     });
 
-    it('POST /api/v1/auth/verify-email con el token del correo → 204 y habilita el login', async () => {
+    it('POST /api/v1/auth/resend-verification con email inexistente → 204 sin enviar correo', async () => {
+      sentMails.length = 0;
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/resend-verification')
+        .send({ email: `nadie-${randomUUID()}@example.com` })
+        .expect(204);
+
+      expect(sentMails).toHaveLength(0);
+    });
+
+    it('el reenvío invalida el token anterior y el nuevo verifica el correo', async () => {
+      sentMails.length = 0;
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/resend-verification')
+        .send({ email })
+        .expect(204);
+
+      expect(sentMails).toHaveLength(1);
+      const newToken = tokenFromMail(sentMails[0]);
+      expect(newToken).not.toBe(verificationToken);
+
+      // El token del primer correo ya no sirve.
       await request(app.getHttpServer())
         .post('/api/v1/auth/verify-email')
-        .send({ token: tokenFromMail(sentMails[0]) })
+        .send({ token: verificationToken })
+        .expect(401);
+
+      // El nuevo sí: habilita el login.
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/verify-email')
+        .send({ token: newToken })
         .expect(204);
+    });
+
+    it('reenviar a un usuario ya verificado → 204 sin enviar correo', async () => {
+      sentMails.length = 0;
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/resend-verification')
+        .send({ email })
+        .expect(204);
+
+      expect(sentMails).toHaveLength(0);
     });
   });
 
