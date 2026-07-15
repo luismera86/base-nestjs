@@ -1,8 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { CookieOptions, Request, Response } from 'express';
-import type { StringValue } from 'ms';
-import * as ms from 'ms';
+import ms, { type StringValue } from 'ms';
 import { AuthTokensDto } from './dto/auth-tokens.dto';
 
 export const ACCESS_TOKEN_COOKIE = 'access_token';
