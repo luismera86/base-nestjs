@@ -36,7 +36,7 @@ const cookieValue = (res: request.Response, name: string): string =>
 describe('Auth (e2e)', () => {
   let app: NestExpressApplication;
   const email = `e2e-${randomUUID()}@example.com`;
-  const password = 'a-very-long-password-123';
+  const password = 'A-very-long-passw0rd!';
   let accessCookie: string;
   let refreshCookie: string;
 
@@ -88,6 +88,13 @@ describe('Auth (e2e)', () => {
     await request(app.getHttpServer())
       .post('/api/v1/auth/register')
       .send({ email: `x-${email}`, password, isAdmin: true })
+      .expect(400);
+  });
+
+  it('rechaza contraseñas débiles (sin mayúscula/número/símbolo) → 400', async () => {
+    await request(app.getHttpServer())
+      .post('/api/v1/auth/register')
+      .send({ email: `weak-${email}`, password: 'alllowercaseletters' })
       .expect(400);
   });
 

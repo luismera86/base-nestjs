@@ -2,5 +2,6 @@
   "IS_EMAIL": "{property} must be a valid email address",
   "IS_STRING": "{property} must be a string",
   "MIN_LENGTH": "{property} must be at least {constraints.0} characters long",
-  "MAX_LENGTH": "{property} must be at most {constraints.0} characters long"
+  "MAX_LENGTH": "{property} must be at most {constraints.0} characters long",
+  "PASSWORD_WEAK": "{property} must contain at least one lowercase letter, one uppercase letter, one number and one special character"
 }

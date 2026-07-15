@@ -88,7 +88,7 @@ Flujo JWT con **access token** (corto, 15 min) y **refresh token** (largo, 7 dí
 
 | Endpoint | Qué hace |
 |---|---|
-| `POST /api/v1/auth/register` | Crea el usuario (password con **argon2id**) y setea las cookies |
+| `POST /api/v1/auth/register` | Crea el usuario (password con **argon2id**) y setea las cookies. Exige contraseña fuerte (ver abajo) |
 | `POST /api/v1/auth/login` | Setea las cookies. Mismo 401 exista o no el email (evita enumeración de usuarios) |
 | `POST /api/v1/auth/refresh` | Lee el refresh de su cookie, **rota el par** y setea las nuevas cookies |
 | `POST /api/v1/auth/logout` | Revoca el refresh token y limpia las cookies |
@@ -96,6 +96,10 @@ Flujo JWT con **access token** (corto, 15 min) y **refresh token** (largo, 7 dí
 **Rotación con detección de reuso**: cada refresh invalida el token anterior. Si se presenta un refresh ya rotado (firma válida pero hash distinto al guardado), se asume robo y **se revoca la sesión completa** — el refresh vigente también deja de servir.
 
 Del refresh token solo se guarda su **hash SHA-256** en la DB (columna `refresh_token_hash`), nunca el token en claro.
+
+### Política de contraseñas
+
+El registro valida la fortaleza de la contraseña en [register.dto.ts](src/modules/auth/dto/register.dto.ts): entre **8 y 128 caracteres** y debe contener al menos **una minúscula, una mayúscula, un número y un carácter especial**. El login no aplica la política (solo valida tipo y longitud máxima), para no rechazar credenciales legítimas creadas antes de un cambio de reglas. Los mensajes de error salen traducidos (es/en) vía `nestjs-i18n`.
 
 ### Propiedades de las cookies ([cookie.service.ts](src/modules/auth/cookie.service.ts))
 
