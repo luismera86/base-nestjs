@@ -42,6 +42,11 @@ export const envSchema = z
     THROTTLE_TTL: z.coerce.number().int().positive().default(60000),
     THROTTLE_LIMIT: z.coerce.number().int().positive().default(100),
 
+    // Cantidad de proxies inversos de confianza delante de la app (nginx,
+    // Apache, ALB...). 0 = ninguno. Con proxy y valor 0, el rate limiting
+    // cuenta a todos los usuarios contra la IP del proxy.
+    TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+
     // Correo (SMTP). Opcionales: sin MAIL_HOST se usa un transporte que escribe
     // el correo en los logs (útil en desarrollo). En producción, configurarlos.
     MAIL_HOST: z.string().default(''),
@@ -56,6 +61,9 @@ export const envSchema = z
 
     // Swagger en /docs. Sin valor: true en dev, false en producción (ver validateEnv).
     SWAGGER_ENABLED: booleanString.optional(),
+    // WebSockets (módulo events). Apagado por defecto: activar solo si el
+    // proyecto los usa (sin la variable, el gateway ni se registra).
+    WS_ENABLED: booleanString.default(false),
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
       .default('info'),

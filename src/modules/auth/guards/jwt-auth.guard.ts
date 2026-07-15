@@ -18,6 +18,11 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   canActivate(context: ExecutionContext) {
+    // Los eventos WS no pasan por aquí: la auth ocurre en el handshake
+    // (ver WsAuthService) y cada gateway se protege con WsJwtGuard.
+    if (context.getType() !== 'http') {
+      return true;
+    }
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),

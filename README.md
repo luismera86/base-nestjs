@@ -60,9 +60,10 @@ Al arrancar, el log muestra las URLs:
 ```
 INFO: Servidor escuchando en http://localhost:3000/api/v1
 INFO: Documentación disponible en http://localhost:3000/docs
+INFO: WebSockets escuchando en http://localhost:3000/events
 ```
 
-El health check queda en `http://localhost:3000/health` (fuera del prefijo de la API, para los probes de infraestructura).
+El health check queda en `http://localhost:3000/health` (fuera del prefijo de la API, para los probes de infraestructura). La línea de WebSockets solo aparece con `WS_ENABLED=true`.
 
 ## Variables de entorno
 
@@ -87,8 +88,11 @@ Validadas con **Zod** al arranque ([env.validation.ts](src/config/env.validation
 | `FRONTEND_URL` | Base del frontend para el enlace de recuperación | `http://localhost:5173` |
 | `PASSWORD_RESET_TTL_MINUTES` | Vigencia del token de recuperación (minutos) | `60` |
 | `THROTTLE_TTL` / `THROTTLE_LIMIT` | Rate limit global (ventana ms / peticiones) | `60000` / `100` |
+| `TRUST_PROXY` | Proxies inversos de confianza delante de la app (`1` con nginx/Apache) | `0` |
 | `SWAGGER_ENABLED` | Habilita `/docs` | `true` en dev, `false` en prod |
+| `WS_ENABLED` | Habilita WebSockets (módulo events) | `false` |
 | `LOG_LEVEL` | Nivel de log de pino | `info` |
+| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | Credenciales del primer admin — solo las lee `pnpm seed`, la app no las usa | requeridas por el seed |
 
 ## Autenticación
 
@@ -152,6 +156,8 @@ La política vive en el decorador reutilizable [`@IsStrongPassword()`](src/commo
 
 - **Navegadores / SPAs**: hacer las peticiones con `credentials: 'include'` (CORS ya responde con `Access-Control-Allow-Credentials`). No hay que manejar tokens a mano.
 - **Clientes API / móviles**: las estrategias también aceptan `Authorization: Bearer <token>` como fallback.
+- **Swagger (`/docs`)**: al ejecutar `POST /auth/login` desde la propia UI, el navegador guarda las cookies (mismo origen) y el resto de los endpoints protegidos funcionan sin más pasos. Alternativa: botón **Authorize** con un Bearer token.
+- **Postman / Insomnia**: manejan cookies automáticamente — basta llamar a login y las siguientes peticiones salen autenticadas. Con curl: `curl -c jar.txt -b jar.txt ...` (guarda y reenvía las cookies).
 
 ### Proteger rutas
 
@@ -162,7 +168,61 @@ El guard JWT es **global**: toda ruta nueva exige token automáticamente, salvo 
 me(@CurrentUser() user: AuthenticatedUser) { ... }
 ```
 
+Ejemplo funcionando: `GET /api/v1/users/me` devuelve el perfil del usuario autenticado.
+
 > **Nota de diseño**: hay una sesión de refresh activa por usuario (simple y suficiente para la mayoría de APIs). Para multi-dispositivo, extender a una tabla `refresh_tokens` con `jti` por sesión.
+
+## WebSockets
+
+Infraestructura de socket.io lista para usar, en [src/modules/events/](src/modules/events/), **desactivada por defecto**: se enciende con `WS_ENABLED=true` en el `.env` (sin la variable, ni el módulo ni el servidor de sockets se registran — cero overhead para proyectos que no los usan).
+
+El namespace es **`/events`** y **toda conexión exige un access token válido**: el handshake se autentica en un middleware (antes de aceptar la conexión) y sin token responde `connect_error` con `errors.UNAUTHORIZED`.
+
+**URL de conexión** — base del servidor + namespace, sin el prefijo de la API:
+
+```
+http://localhost:3000/events        # desarrollo
+https://api.midominio.com/events    # producción
+```
+
+Tres aclaraciones sobre la URL:
+
+- `/events` es un **namespace lógico de socket.io, no una ruta HTTP** — el prefijo `/api/v1` solo aplica a los controllers REST. Abrir `/events` en el navegador da 404: es normal, solo el cliente de socket.io sabe hablarle.
+- Se usa esquema **`http`/`https`, no `ws`/`wss`**: el cliente de socket.io negocia el upgrade a WebSocket solo.
+- Todo el tráfico real (handshake y mensajes) viaja por el endpoint **`/socket.io/`**; si hay un proxy delante (nginx, traefik), es esa ruta la que necesita soporte de upgrade/WebSocket.
+
+**Cliente browser** — la cookie httpOnly viaja sola:
+
+```ts
+import { io } from 'socket.io-client';
+const socket = io('http://localhost:3000/events', { withCredentials: true });
+socket.emit('ping');
+socket.on('pong', (data) => console.log(data));
+```
+
+**Cliente Node / mobile** — token por `auth` (mismo access token del login):
+
+```ts
+const socket = io('http://localhost:3000/events', { auth: { token: accessToken } });
+```
+
+**Emitir desde cualquier módulo** — cada usuario entra a su room `user:{id}` al conectar; `EventsService` (exportado por `EventsModule`) permite notificarle a todas sus conexiones:
+
+```ts
+// en el módulo: imports: [EventsModule]
+constructor(private readonly eventsService: EventsService) {}
+
+this.eventsService.emitToUser(userId, 'notification', { text: 'Hola' });
+this.eventsService.emitToAll('announcement', { text: 'Para todos' });
+```
+
+Detalles de diseño:
+
+- El **CORS** del gateway lo aporta [`SocketIoAdapter`](src/common/adapters/socket-io.adapter.ts) (registrado en main.ts) con los mismos `CORS_ORIGINS` + credentials del HTTP.
+- `@Roles()` funciona igual en eventos WS que en rutas HTTP (el `RolesGuard` global es context-aware).
+- Los errores en handlers se emiten por el evento **`exception`** con `{ status, message, timestamp }`; los mensajes son claves del catálogo i18n **sin traducir** (en WS no hay `Accept-Language` por evento).
+- Para un gateway nuevo: replicar el patrón de [`events.gateway.ts`](src/modules/events/events.gateway.ts) (`@UseGuards(WsJwtGuard)` + `@UseFilters(WsExceptionsFilter)` + middleware de handshake en `afterInit`).
+- Si el proyecto no necesita sockets: basta dejar `WS_ENABLED=false` (o borrar la variable). Para eliminarlos del todo: quitar el `ConditionalModule.registerWhen(EventsModule, ...)` de `app.module.ts`, el bloque del adapter en `main.ts` y la carpeta `src/modules/events/`.
 
 ## Paginación estándar
 
@@ -188,7 +248,8 @@ Ejemplo funcionando: `GET /api/v1/users?page=1&limit=20` (solo admin).
 - **Tokens en cookies `httpOnly`** con `SameSite=Lax` y `Secure` en producción.
 - **Verificación de email obligatoria** antes de poder iniciar sesión.
 - **Solo se parsea body JSON** (sin parser `urlencoded`): un `<form>` cross-site llega con body vacío y se rechaza — cierra el login-CSRF. Límite de tamaño de body explícito (`BODY_LIMIT`).
-- **RBAC** con guard global de roles (`@Roles`).
+- **RBAC** con guard global de roles (`@Roles`), también en eventos WebSocket.
+- **WebSockets autenticados**: el handshake de socket.io exige access token (cookie o `auth.token`) y el CORS del gateway respeta `CORS_ORIGINS`.
 - **helmet** (headers de seguridad) y **CORS** restringido a `CORS_ORIGINS`.
 - **Rate limiting** global (`@nestjs/throttler`) + límite estricto de 5/min en los endpoints de auth (blanco típico de fuerza bruta).
 - **ValidationPipe global** (`I18nValidationPipe`) con `whitelist` + `forbidNonWhitelisted`: cualquier propiedad fuera del DTO rechaza la petición.
@@ -328,6 +389,69 @@ docker run --env-file .env -p 3000:3000 base-nestjs
 
 Los logs de archivo se escriben en `/app/logs`: montar un volumen ahí si se quiere persistirlos fuera del contenedor.
 
+## Checklist de producción
+
+Antes del primer despliegue:
+
+- [ ] `NODE_ENV=production` — activa los defaults seguros: cookies `Secure`, Swagger apagado, logs JSON.
+- [ ] Secretos JWT **nuevos** (no los de desarrollo): `openssl rand -hex 32` para cada uno.
+- [ ] `CORS_ORIGINS` con los dominios reales del frontend (sin `localhost`).
+- [ ] Servir **solo por HTTPS**: con `COOKIE_SECURE=true` (default en prod) las cookies de auth no viajan por HTTP plano.
+- [ ] **Detrás de un proxy/balanceador** (nginx, Apache, traefik, ALB): poner `TRUST_PROXY=1` (o la cantidad de saltos) y verificar que el proxy reenvíe `X-Forwarded-For` — ver [Desplegar detrás de nginx/Apache](#desplegar-detrás-de-nginxapache). Sin esto el rate limiting cuenta todas las peticiones contra la IP del proxy (un solo cliente puede agotar la cuota de todos).
+- [ ] Correr `pnpm migration:run` como paso del deploy, **antes** de levantar la app nueva.
+- [ ] `pnpm seed` una única vez con credenciales de admin reales (rotar `SEED_ADMIN_PASSWORD` después).
+- [ ] Configurar `MAIL_*` con el SMTP real — sin `MAIL_HOST` los correos de verificación y recuperación solo se loguean, y nadie podrá completar el registro.
+- [ ] Si `WS_ENABLED=true` y hay proxy: habilitar upgrade/WebSocket en la ruta `/socket.io/`.
+- [ ] Volumen o shipping de logs para `/app/logs` (o borrar los destinos de archivo y quedarse solo con stdout si el orquestador ya recolecta).
+- [ ] Apuntar los probes de liveness/readiness a `GET /health`.
+
+## Desplegar detrás de nginx/Apache
+
+Con un proxy inverso delante, la app recibe todas las conexiones desde la IP del proxy. Para que `req.ip` sea la **IP real del cliente** (de eso dependen el rate limiting por usuario y los logs) hacen falta dos cosas: que el proxy reenvíe la IP en `X-Forwarded-For` y que la app confíe en él (`TRUST_PROXY=1`; con dos saltos, p. ej. Cloudflare → nginx, `TRUST_PROXY=2`).
+
+**nginx**:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name api.midominio.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # WebSockets (solo si WS_ENABLED=true)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+**Apache** (módulos `proxy`, `proxy_http`; `proxy_wstunnel` y `rewrite` para sockets):
+
+```apache
+<VirtualHost *:443>
+    ServerName api.midominio.com
+
+    ProxyPreserveHost On
+    # mod_proxy agrega X-Forwarded-For automáticamente
+
+    # WebSockets (solo si WS_ENABLED=true) — antes del ProxyPass general
+    RewriteEngine On
+    RewriteCond %{HTTP:Upgrade} =websocket [NC]
+    RewriteRule ^/socket.io/(.*) ws://127.0.0.1:3000/socket.io/$1 [P,L]
+
+    ProxyPass / http://127.0.0.1:3000/
+    ProxyPassReverse / http://127.0.0.1:3000/
+</VirtualHost>
+```
+
+Y en el `.env` de la app: `TRUST_PROXY=1`.
+
+> Importante: `TRUST_PROXY` debe quedar en `0` cuando NO hay proxy — si la app confía en `X-Forwarded-For` estando expuesta directo, cualquier cliente puede falsificar su IP con esa cabecera y evadir el rate limiting.
+
 ## Estructura
 
 ```
@@ -336,11 +460,12 @@ src/
 ├── app.module.ts            # config, DB, logger, throttler + providers globales
 ├── config/                  # validación Zod del env + configs tipadas por dominio
 ├── common/
+│   ├── adapters/            # SocketIoAdapter (CORS de sockets desde config)
 │   ├── decorators/          # @Public, @CurrentUser, @Roles, @IsStrongPassword
 │   ├── dto/                 # PaginationQueryDto, Paginated<T>
 │   ├── entities/            # BaseEntity (id, timestamps, soft delete)
 │   ├── enums/               # Role
-│   ├── guards/              # RolesGuard (global)
+│   ├── guards/              # RolesGuard (global, HTTP y WS)
 │   └── filters/             # filtro global de excepciones + validación i18n
 ├── i18n/                    # traducciones de errores y validación (es, en)
 ├── database/                # módulo TypeORM, data-source del CLI, migraciones
@@ -352,16 +477,22 @@ src/
 │   │   ├── use-cases/       # get-profile, list-users (paginado, admin)
 │   │   ├── users.service.ts # fachada
 │   │   └── users.controller.ts
-│   └── auth/
-│       ├── dto/             # register, login, verify-email, forgot/reset-password
-│       ├── guards/          # jwt, jwt-refresh
-│       ├── strategies/      # extracción cookie-first con fallback Bearer
-│       ├── use-cases/       # register, verify-email, login, refresh, logout,
-│       │                    # forgot-password, reset-password
-│       ├── token.service.ts # soporte: emisión y hash de tokens
-│       ├── cookie.service.ts# soporte: entrega/limpieza de cookies httpOnly
-│       ├── auth.service.ts  # fachada
-│       └── auth.controller.ts
+│   ├── auth/
+│   │   ├── dto/             # register, login, verify-email, forgot/reset-password
+│   │   ├── guards/          # jwt, jwt-refresh
+│   │   ├── strategies/      # extracción cookie-first con fallback Bearer
+│   │   ├── use-cases/       # register, verify-email, login, refresh, logout,
+│   │   │                    # forgot-password, reset-password
+│   │   ├── token.service.ts # soporte: emisión y hash de tokens
+│   │   ├── cookie.service.ts# soporte: entrega/limpieza de cookies httpOnly
+│   │   ├── auth.service.ts  # fachada
+│   │   └── auth.controller.ts
+│   └── events/              # WebSockets: gateway /events con handshake autenticado
+│       ├── events.gateway.ts    # ejemplo ping→pong + room user:{id}
+│       ├── events.service.ts    # emitToUser/emitToAll para otros módulos
+│       ├── ws-auth.service.ts   # verificación del token en el handshake
+│       ├── guards/              # WsJwtGuard
+│       └── filters/             # WsExceptionsFilter (evento 'exception')
 └── health/                  # GET /health con ping a la DB (Terminus)
 ```
 

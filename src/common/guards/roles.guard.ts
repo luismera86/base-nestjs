@@ -23,9 +23,25 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    const { user } = context
-      .switchToHttp()
-      .getRequest<Request & { user?: AuthenticatedUser }>();
+    const user = this.extractUser(context);
     return user !== undefined && requiredRoles.includes(user.role);
+  }
+
+  /**
+   * En HTTP el user lo pone passport en request.user; en WS lo puso
+   * WsAuthService en socket.data.user durante el handshake. Tipo
+   * estructural para no acoplar common/ a socket.io.
+   */
+  private extractUser(
+    context: ExecutionContext,
+  ): AuthenticatedUser | undefined {
+    if (context.getType() === 'ws') {
+      return context
+        .switchToWs()
+        .getClient<{ data: { user?: AuthenticatedUser } }>().data.user;
+    }
+    return context
+      .switchToHttp()
+      .getRequest<Request & { user?: AuthenticatedUser }>().user;
   }
 }

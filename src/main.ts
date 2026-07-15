@@ -1,6 +1,7 @@
 import { VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
@@ -9,12 +10,13 @@ import helmet from 'helmet';
 import { I18nValidationPipe } from 'nestjs-i18n';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
+import { SocketIoAdapter } from './common/adapters/socket-io.adapter';
 
 async function bootstrap() {
   // bodyParser: false → se registra SOLO el parser JSON (abajo). Sin el parser
   // urlencoded, un <form> cross-site (simple request, sin preflight de CORS)
   // llega con body vacío y la validación lo rechaza: cierra el login-CSRF.
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
     bodyParser: false,
   });
@@ -22,6 +24,14 @@ async function bootstrap() {
   app.useLogger(logger);
 
   const config = app.get(ConfigService);
+
+  // Detrás de un proxy inverso (nginx, Apache, ALB): confiar en la cabecera
+  // X-Forwarded-For que escribe el proxy para que req.ip sea la IP real del
+  // cliente — sin esto el rate limiting cuenta a todos contra la IP del proxy.
+  const trustProxy = config.getOrThrow<number>('app.trustProxy');
+  if (trustProxy > 0) {
+    app.set('trust proxy', trustProxy);
+  }
 
   app.use(helmet());
   app.use(compression());
@@ -34,6 +44,12 @@ async function bootstrap() {
     // Los tokens viajan en cookies: el frontend debe pedir con credentials: 'include'.
     credentials: true,
   });
+  // WebSockets (socket.io) con el mismo criterio de CORS que el HTTP.
+  // Opt-in: el módulo events solo se registra con WS_ENABLED=true (app.module).
+  const wsEnabled = config.getOrThrow<boolean>('app.wsEnabled');
+  if (wsEnabled) {
+    app.useWebSocketAdapter(new SocketIoAdapter(app));
+  }
 
   // Rutas: /api/v1/... — /health queda fuera del prefijo para los probes de infra.
   app.setGlobalPrefix(config.getOrThrow<string>('app.apiPrefix'), {
@@ -84,6 +100,9 @@ async function bootstrap() {
   );
   if (swaggerEnabled) {
     logger.log(`Documentación disponible en ${url}/docs`);
+  }
+  if (wsEnabled) {
+    logger.log(`WebSockets escuchando en ${url}/events`);
   }
 }
 void bootstrap();

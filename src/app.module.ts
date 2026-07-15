@@ -1,5 +1,5 @@
 import { ClassSerializerInterceptor, Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConditionalModule, ConfigModule, ConfigService } from '@nestjs/config';
 import {
   APP_FILTER,
   APP_GUARD,
@@ -23,6 +23,7 @@ import throttlerConfig, { throttlerFactory } from './config/throttler.config';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { EventsModule } from './modules/events/events.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { MailModule } from './modules/mail/mail.module';
 import { UsersModule } from './modules/users/users.module';
@@ -57,6 +58,12 @@ import { UsersModule } from './modules/users/users.module';
     MailModule,
     UsersModule,
     AuthModule,
+    // WebSockets opt-in: sin WS_ENABLED=true el módulo ni se registra.
+    // ConfigModule.forRoot (arriba) ya cargó el .env en process.env.
+    ConditionalModule.registerWhen(
+      EventsModule,
+      (env) => env.WS_ENABLED === 'true',
+    ),
     HealthModule,
   ],
   providers: [

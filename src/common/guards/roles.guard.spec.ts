@@ -14,9 +14,22 @@ describe('RolesGuard', () => {
     user?: Pick<AuthenticatedUser, 'role'>,
   ): ExecutionContext =>
     ({
+      getType: () => 'http',
       getHandler: () => handler,
       getClass: () => class {},
       switchToHttp: () => ({ getRequest: () => ({ user }) }),
+    }) as unknown as ExecutionContext;
+
+  /** Variante WS: el user vive en socket.data.user (lo puso WsAuthService). */
+  const wsContextFor = (
+    handler: () => void,
+    user?: Pick<AuthenticatedUser, 'role'>,
+  ): ExecutionContext =>
+    ({
+      getType: () => 'ws',
+      getHandler: () => handler,
+      getClass: () => class {},
+      switchToWs: () => ({ getClient: () => ({ data: { user } }) }),
     }) as unknown as ExecutionContext;
 
   it('permite rutas sin @Roles (basta autenticarse)', () => {
@@ -42,5 +55,17 @@ describe('RolesGuard', () => {
     const ctx = (role: Role) => contextFor(Dummy.prototype.handler, { role });
     expect(guard.canActivate(ctx(Role.ADMIN))).toBe(true);
     expect(guard.canActivate(ctx(Role.USER))).toBe(false);
+  });
+
+  it('en contexto ws lee el user de socket.data (mismo criterio de roles)', () => {
+    class Dummy {
+      @Roles(Role.ADMIN)
+      handler(this: void) {}
+    }
+    const ctx = (user?: Pick<AuthenticatedUser, 'role'>) =>
+      wsContextFor(Dummy.prototype.handler, user);
+    expect(guard.canActivate(ctx({ role: Role.ADMIN }))).toBe(true);
+    expect(guard.canActivate(ctx({ role: Role.USER }))).toBe(false);
+    expect(guard.canActivate(ctx(undefined))).toBe(false);
   });
 });

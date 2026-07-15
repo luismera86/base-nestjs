@@ -17,4 +17,6 @@ export const throttlerFactory = (
   ],
   // Clave de traducción: AllExceptionsFilter la resuelve al idioma del request.
   errorMessage: 'errors.TOO_MANY_REQUESTS',
+  // El tracker del throttler lee req.ip (HTTP): en eventos WS no aplica.
+  skipIf: (context) => context.getType() !== 'http',
 });
