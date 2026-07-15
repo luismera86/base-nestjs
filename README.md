@@ -109,9 +109,9 @@ Del refresh token solo se guarda su **hash SHA-256** en la DB (columna `refresh_
 
 El registro **no emite sesión**: crea el usuario con un token de verificación (en DB solo su hash SHA-256) y envía el correo con el enlace `${FRONTEND_URL}/verify-email?token=...`. El **login queda bloqueado (403)** hasta que el correo se verifique con `POST /auth/verify-email`. El chequeo de verificación corre después de validar la contraseña, así no revela nada a terceros. El token es de un solo uso.
 
-### Roles y permisos (RBAC)
+### Roles (RBAC)
 
-Autorización mínima lista para extender:
+Autorización simple por roles, lista para extender:
 
 - `User.role` (`admin` | `user`, default `user`) — enum en [role.enum.ts](src/common/enums/role.enum.ts).
 - El rol viaja **dentro del JWT**: sin consulta a DB por request. Un cambio de rol aplica al renovar el token (máx. 15 min) o al re-loguear.
@@ -187,7 +187,7 @@ Ejemplo funcionando: `GET /api/v1/users?page=1&limit=20` (solo admin).
 - **Rate limiting** global (`@nestjs/throttler`) + límite estricto de 5/min en los endpoints de auth (blanco típico de fuerza bruta).
 - **ValidationPipe global** (`I18nValidationPipe`) con `whitelist` + `forbidNonWhitelisted`: cualquier propiedad fuera del DTO rechaza la petición.
 - **ClassSerializerInterceptor global**: `password` y `refreshTokenHash` tienen `@Exclude()` (y `select: false` en la entidad), jamás salen en una respuesta.
-- **Filtro global de excepciones**: formato de error uniforme con `requestId`, sin stack traces ni detalles internos al cliente.
+- **Filtro global de excepciones**: formato de error uniforme con `requestId`, sin stack traces ni detalles internos al cliente. Mapea errores conocidos de Postgres a HTTP correcto (unique violation → 409, FK violation → 409, uuid inválido → 400) — p. ej., la carrera de dos registros simultáneos con el mismo email responde 409, no 500.
 - **Logs con redacción**: `authorization`, `cookie`, `password` y `refreshToken` aparecen como `[Redacted]`.
 - **Fail-fast de configuración**: env inválido aborta el boot.
 - **Graceful shutdown** (`enableShutdownHooks`) y contenedor con usuario no-root.

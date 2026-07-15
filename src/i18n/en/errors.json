@@ -9,5 +9,8 @@
   "EMAIL_ALREADY_REGISTERED": "Email already registered",
   "USER_NOT_FOUND": "User not found",
   "TOO_MANY_REQUESTS": "Too many requests, please try again later",
+  "DUPLICATE_RESOURCE": "A record with this data already exists",
+  "RELATED_RESOURCE": "The operation conflicts with a related resource",
+  "INVALID_IDENTIFIER": "The identifier provided is not valid",
   "INTERNAL_SERVER_ERROR": "Internal server error"
 }

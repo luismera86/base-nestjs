@@ -9,5 +9,8 @@
   "EMAIL_ALREADY_REGISTERED": "El correo electrónico ya está registrado",
   "USER_NOT_FOUND": "Usuario no encontrado",
   "TOO_MANY_REQUESTS": "Demasiadas solicitudes, intenta de nuevo más tarde",
+  "DUPLICATE_RESOURCE": "Ya existe un registro con esos datos",
+  "RELATED_RESOURCE": "La operación entra en conflicto con un recurso relacionado",
+  "INVALID_IDENTIFIER": "El identificador enviado no es válido",
   "INTERNAL_SERVER_ERROR": "Error interno del servidor"
 }

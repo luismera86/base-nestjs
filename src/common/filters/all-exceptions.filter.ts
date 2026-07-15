@@ -8,6 +8,37 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { I18nContext, I18nService } from 'nestjs-i18n';
+import { QueryFailedError } from 'typeorm';
+
+/**
+ * Errores conocidos de Postgres → respuesta HTTP prolija.
+ * Ejemplo típico: dos registros simultáneos con el mismo email pasan el
+ * check de duplicado y el índice UNIQUE frena al segundo → 409, no 500.
+ * Lo no mapeado sigue siendo 500 opaco (nunca se filtra SQL al cliente).
+ */
+const PG_ERRORS: Record<
+  string,
+  { statusCode: HttpStatus; error: string; message: string }
+> = {
+  // unique_violation
+  '23505': {
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    message: 'errors.DUPLICATE_RESOURCE',
+  },
+  // foreign_key_violation
+  '23503': {
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    message: 'errors.RELATED_RESOURCE',
+  },
+  // invalid_text_representation (ej: uuid malformado en una query)
+  '22P02': {
+    statusCode: HttpStatus.BAD_REQUEST,
+    error: 'Bad Request',
+    message: 'errors.INVALID_IDENTIFIER',
+  },
+};
 
 export type ErrorResponseBody = {
   statusCode: number;
@@ -43,6 +74,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let error = 'Internal Server Error';
     let message: string | string[] = 'errors.INTERNAL_SERVER_ERROR';
 
+    const pgError =
+      exception instanceof QueryFailedError
+        ? PG_ERRORS[
+            (exception.driverError as { code?: string } | undefined)?.code ?? ''
+          ]
+        : undefined;
+
     if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
       const body = exception.getResponse();
@@ -57,6 +95,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
         error = httpBody.error ?? exception.name;
         message = httpBody.message ?? exception.message;
       }
+    } else if (pgError) {
+      // Error de DB esperable (unique/FK/uuid): respuesta 4xx y rastro en el log.
+      ({ statusCode, error, message } = pgError);
+      this.logger.warn(
+        `QueryFailedError mapeado a ${statusCode} on ${request.method} ${request.url} (requestId=${requestId ?? '-'})`,
+      );
     } else {
       // Excepción inesperada: detalle completo al log, nunca al cliente.
       this.logger.error(
