@@ -9,10 +9,12 @@ import { CookieService } from './cookie.service';
 import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { TokenService } from './token.service';
+import { ForgotPasswordUseCase } from './use-cases/forgot-password.use-case';
 import { LoginUseCase } from './use-cases/login.use-case';
 import { LogoutUseCase } from './use-cases/logout.use-case';
 import { RefreshTokensUseCase } from './use-cases/refresh-tokens.use-case';
 import { RegisterUseCase } from './use-cases/register.use-case';
+import { ResetPasswordUseCase } from './use-cases/reset-password.use-case';
 
 @Module({
   // JwtModule sin secret global: cada firma pasa secret/expiresIn explícitos
@@ -31,6 +33,8 @@ import { RegisterUseCase } from './use-cases/register.use-case';
     LoginUseCase,
     RefreshTokensUseCase,
     LogoutUseCase,
+    ForgotPasswordUseCase,
+    ResetPasswordUseCase,
     JwtStrategy,
     JwtRefreshStrategy,
   ],

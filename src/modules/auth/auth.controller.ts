@@ -18,8 +18,10 @@ import {
 } from '../../common/types/authenticated-user.type';
 import { AuthService } from './auth.service';
 import { CookieService } from './cookie.service';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 
 // Los endpoints de auth son el blanco de fuerza bruta: límite estricto (5/min).
@@ -86,5 +88,26 @@ export class AuthController {
   ): Promise<void> {
     await this.authService.logout(user.id);
     this.cookieService.clearAuthCookies(res);
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Envía un correo con el enlace para recuperar la contraseña',
+  })
+  async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<void> {
+    // Siempre 204, exista o no el email (evita enumeración de usuarios).
+    await this.authService.forgotPassword(dto.email);
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Restablece la contraseña con el token recibido por correo',
+  })
+  async resetPassword(@Body() dto: ResetPasswordDto): Promise<void> {
+    await this.authService.resetPassword(dto.token, dto.password);
   }
 }

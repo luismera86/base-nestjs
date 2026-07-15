@@ -35,6 +35,18 @@ export const envValidationSchema = Joi.object({
   THROTTLE_TTL: Joi.number().default(60000),
   THROTTLE_LIMIT: Joi.number().default(100),
 
+  // Correo (SMTP). Opcionales: sin MAIL_HOST se usa un transporte que escribe
+  // el correo en los logs (útil en desarrollo). En producción, configurarlos.
+  MAIL_HOST: Joi.string().allow('').default(''),
+  MAIL_PORT: Joi.number().port().default(587),
+  MAIL_SECURE: Joi.boolean().default(false),
+  MAIL_USER: Joi.string().allow('').default(''),
+  MAIL_PASSWORD: Joi.string().allow('').default(''),
+  MAIL_FROM: Joi.string().default('no-reply@example.com'),
+
+  FRONTEND_URL: Joi.string().uri().default('http://localhost:5173'),
+  PASSWORD_RESET_TTL_MINUTES: Joi.number().positive().default(60),
+
   // Flag Secure de las cookies de auth (solo HTTPS). Default: true en producción.
   COOKIE_SECURE: Joi.boolean().when('NODE_ENV', {
     is: 'production',

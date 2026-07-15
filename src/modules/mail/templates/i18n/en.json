@@ -1,0 +1,8 @@
+{
+  "passwordReset": {
+    "subject": "Password recovery",
+    "intro": "We received a request to reset your password. The link is valid for {ttlMinutes} minutes:",
+    "cta": "Reset password",
+    "ignore": "If you didn't request this change, you can ignore this email."
+  }
+}

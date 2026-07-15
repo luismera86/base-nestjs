@@ -1,0 +1,8 @@
+{
+  "passwordReset": {
+    "subject": "Recuperación de contraseña",
+    "intro": "Recibimos una solicitud para restablecer tu contraseña. El enlace es válido por {ttlMinutes} minutos:",
+    "cta": "Restablecer contraseña",
+    "ignore": "Si no solicitaste este cambio, puedes ignorar este correo."
+  }
+}

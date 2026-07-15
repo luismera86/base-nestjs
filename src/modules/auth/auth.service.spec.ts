@@ -4,13 +4,16 @@ import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import * as argon2 from 'argon2';
+import { MailService } from '../mail/mail.service';
 import { User } from '../users/entities/user.entity';
 import { AuthService } from './auth.service';
 import { TokenService } from './token.service';
+import { ForgotPasswordUseCase } from './use-cases/forgot-password.use-case';
 import { LoginUseCase } from './use-cases/login.use-case';
 import { LogoutUseCase } from './use-cases/logout.use-case';
 import { RefreshTokensUseCase } from './use-cases/refresh-tokens.use-case';
 import { RegisterUseCase } from './use-cases/register.use-case';
+import { ResetPasswordUseCase } from './use-cases/reset-password.use-case';
 
 // Se testea a través de la fachada AuthService con los use cases reales:
 // valida el wiring completo del módulo, solo se mockea la infraestructura.
@@ -22,6 +25,7 @@ describe('AuthService', () => {
     save: jest.Mock;
     update: jest.Mock;
   };
+  let mailService: { sendMail: jest.Mock };
 
   const user = {
     id: 'user-id-1',
@@ -46,6 +50,7 @@ describe('AuthService', () => {
       save: jest.fn().mockResolvedValue(user),
       update: jest.fn(),
     };
+    mailService = { sendMail: jest.fn().mockResolvedValue(undefined) };
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -55,7 +60,10 @@ describe('AuthService', () => {
         LoginUseCase,
         RefreshTokensUseCase,
         LogoutUseCase,
+        ForgotPasswordUseCase,
+        ResetPasswordUseCase,
         { provide: getRepositoryToken(User), useValue: usersRepository },
+        { provide: MailService, useValue: mailService },
         {
           provide: JwtService,
           useValue: {
@@ -72,11 +80,13 @@ describe('AuthService', () => {
           provide: ConfigService,
           useValue: {
             getOrThrow: jest.fn().mockImplementation((key: string) => {
-              const values: Record<string, string> = {
+              const values: Record<string, string | number> = {
                 'jwt.accessSecret': 'a'.repeat(32),
                 'jwt.accessExpiresIn': '15m',
                 'jwt.refreshSecret': 'b'.repeat(32),
                 'jwt.refreshExpiresIn': '7d',
+                'app.frontendUrl': 'http://localhost:5173',
+                'app.passwordResetTtlMinutes': 60,
               };
               return values[key];
             }),
@@ -204,6 +214,37 @@ describe('AuthService', () => {
       expect(usersRepository.update).toHaveBeenCalledWith(user.id, {
         refreshTokenHash: null,
       });
+    });
+  });
+
+  describe('forgotPassword', () => {
+    it('does nothing (and sends no email) when the email does not exist', async () => {
+      usersRepository.findOne.mockResolvedValue(null);
+
+      await authService.forgotPassword('nobody@example.com');
+
+      expect(usersRepository.update).not.toHaveBeenCalled();
+      expect(mailService.sendMail).not.toHaveBeenCalled();
+    });
+
+    it('stores only a hash with expiry and emails the raw token link', async () => {
+      usersRepository.findOne.mockResolvedValue(user);
+
+      await authService.forgotPassword(user.email);
+
+      const [, updateData] = usersRepository.update.mock.calls[0] as [
+        string,
+        { passwordResetTokenHash: string; passwordResetExpiresAt: Date },
+      ];
+      const [mail] = mailService.sendMail.mock.calls[0] as [{ text: string }];
+      const rawToken = /token=([a-f0-9]+)/.exec(mail.text)?.[1] ?? '';
+
+      // El correo lleva el token en claro; la DB solo su hash (distintos).
+      expect(rawToken).toHaveLength(64);
+      expect(updateData.passwordResetTokenHash).not.toBe(rawToken);
+      expect(updateData.passwordResetExpiresAt.getTime()).toBeGreaterThan(
+        Date.now(),
+      );
     });
   });
 });

@@ -2,6 +2,7 @@
   "UNAUTHORIZED": "No autorizado",
   "INVALID_CREDENTIALS": "Credenciales inválidas",
   "INVALID_REFRESH_TOKEN": "Refresh token inválido",
+  "INVALID_RESET_TOKEN": "El token de recuperación es inválido o expiró",
   "EMAIL_ALREADY_REGISTERED": "El correo electrónico ya está registrado",
   "USER_NOT_FOUND": "Usuario no encontrado",
   "TOO_MANY_REQUESTS": "Demasiadas solicitudes, intenta de nuevo más tarde",

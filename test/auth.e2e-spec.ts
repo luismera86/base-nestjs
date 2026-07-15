@@ -5,6 +5,9 @@ import * as cookieParser from 'cookie-parser';
 import { randomUUID } from 'node:crypto';
 import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { MailService } from '../src/modules/mail/mail.service';
+
+type SentMail = { to: string; subject: string; html: string; text: string };
 
 type UserBody = {
   email: string;
@@ -39,11 +42,22 @@ describe('Auth (e2e)', () => {
   const password = 'A-very-long-passw0rd!';
   let accessCookie: string;
   let refreshCookie: string;
+  // Captura los correos en vez de enviarlos, para leer el token de reset.
+  const sentMails: SentMail[] = [];
+  const mailServiceMock = {
+    sendMail: (mail: SentMail) => {
+      sentMails.push(mail);
+      return Promise.resolve();
+    },
+  };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(MailService)
+      .useValue(mailServiceMock)
+      .compile();
 
     app = moduleRef.createNestApplication<NestExpressApplication>();
     // Replica la configuración de main.ts que afecta al routing/validación.
@@ -177,6 +191,96 @@ describe('Auth (e2e)', () => {
       .post('/api/v1/auth/refresh')
       .set('Cookie', `refresh_token=${refreshCookie}`)
       .expect(401);
+  });
+
+  describe('recuperación de contraseña', () => {
+    const newPassword = 'A-new-str0ng-passw0rd!';
+    let resetToken: string;
+
+    it('POST /api/v1/auth/forgot-password con email inexistente → 204 sin enviar correo', async () => {
+      sentMails.length = 0;
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/forgot-password')
+        .send({ email: `nadie-${randomUUID()}@example.com` })
+        .expect(204);
+
+      expect(sentMails).toHaveLength(0);
+    });
+
+    it('POST /api/v1/auth/forgot-password con email real → 204 y envía el correo con el token', async () => {
+      sentMails.length = 0;
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/forgot-password')
+        .send({ email })
+        .expect(204);
+
+      expect(sentMails).toHaveLength(1);
+      expect(sentMails[0].to).toBe(email);
+      const match = /token=([a-f0-9]+)/.exec(sentMails[0].text);
+      resetToken = match?.[1] ?? '';
+      expect(resetToken).toHaveLength(64); // 32 bytes en hex
+    });
+
+    it('el correo sale en el idioma del request (Accept-Language)', async () => {
+      sentMails.length = 0;
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/forgot-password')
+        .set('Accept-Language', 'en')
+        .send({ email })
+        .expect(204);
+
+      expect(sentMails[0].subject).toBe('Password recovery');
+
+      // Sin header → idioma por defecto (es). Este es el token que se usa después.
+      sentMails.length = 0;
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/forgot-password')
+        .send({ email })
+        .expect(204);
+
+      expect(sentMails[0].subject).toBe('Recuperación de contraseña');
+      const match = /token=([a-f0-9]+)/.exec(sentMails[0].text);
+      resetToken = match?.[1] ?? '';
+      expect(resetToken).toHaveLength(64);
+    });
+
+    it('POST /api/v1/auth/reset-password con token inválido → 401', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/reset-password')
+        .send({ token: 'token-que-no-existe', password: newPassword })
+        .expect(401);
+    });
+
+    it('POST /api/v1/auth/reset-password con contraseña débil → 400', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/reset-password')
+        .send({ token: resetToken, password: 'debil' })
+        .expect(400);
+    });
+
+    it('POST /api/v1/auth/reset-password con token válido → 204 y cambia la contraseña', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/reset-password')
+        .send({ token: resetToken, password: newPassword })
+        .expect(204);
+
+      // La contraseña vieja ya no sirve; la nueva sí.
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email, password })
+        .expect(401);
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email, password: newPassword })
+        .expect(200);
+    });
+
+    it('el token de reset es de un solo uso → 401 al reutilizarlo', async () => {
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/reset-password')
+        .send({ token: resetToken, password: 'A-third-passw0rd!' })
+        .expect(401);
+    });
   });
 
   it('GET /health → 200 público con check de DB', async () => {

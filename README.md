@@ -78,6 +78,10 @@ Validadas con Joi al arranque ([env.validation.ts](src/config/env.validation.ts)
 | `JWT_REFRESH_SECRET` | Secreto del refresh token (mín. 32 chars, distinto del access) | requerida |
 | `JWT_REFRESH_EXPIRES_IN` | TTL del refresh token | `7d` |
 | `COOKIE_SECURE` | Flag `Secure` de las cookies de auth (solo HTTPS) | `true` en prod, `false` en dev |
+| `MAIL_HOST` / `MAIL_PORT` / `MAIL_SECURE` / `MAIL_USER` / `MAIL_PASSWORD` | SMTP. Sin `MAIL_HOST`, los correos se loguean en vez de enviarse | opcionales |
+| `MAIL_FROM` | Remitente de los correos | `no-reply@example.com` |
+| `FRONTEND_URL` | Base del frontend para el enlace de recuperación | `http://localhost:5173` |
+| `PASSWORD_RESET_TTL_MINUTES` | Vigencia del token de recuperación (minutos) | `60` |
 | `THROTTLE_TTL` / `THROTTLE_LIMIT` | Rate limit global (ventana ms / peticiones) | `60000` / `100` |
 | `SWAGGER_ENABLED` | Habilita `/docs` | `true` en dev, `false` en prod |
 | `LOG_LEVEL` | Nivel de log de pino | `info` |
@@ -92,14 +96,27 @@ Flujo JWT con **access token** (corto, 15 min) y **refresh token** (largo, 7 dí
 | `POST /api/v1/auth/login` | Setea las cookies. Mismo 401 exista o no el email (evita enumeración de usuarios) |
 | `POST /api/v1/auth/refresh` | Lee el refresh de su cookie, **rota el par** y setea las nuevas cookies |
 | `POST /api/v1/auth/logout` | Revoca el refresh token y limpia las cookies |
+| `POST /api/v1/auth/forgot-password` | Envía por correo un enlace con token para recuperar la contraseña |
+| `POST /api/v1/auth/reset-password` | Restablece la contraseña con el token recibido |
 
 **Rotación con detección de reuso**: cada refresh invalida el token anterior. Si se presenta un refresh ya rotado (firma válida pero hash distinto al guardado), se asume robo y **se revoca la sesión completa** — el refresh vigente también deja de servir.
 
 Del refresh token solo se guarda su **hash SHA-256** en la DB (columna `refresh_token_hash`), nunca el token en claro.
 
+### Recuperación de contraseña
+
+Flujo en dos pasos, sin revelar si un email existe:
+
+1. `POST /auth/forgot-password` con `{ email }` → responde **204 siempre** (exista o no el email, evita enumeración). Si existe, genera un token aleatorio de 256 bits, guarda en la DB solo su **hash SHA-256** con vencimiento (`PASSWORD_RESET_TTL_MINUTES`, default 60) y envía un correo con el enlace `${FRONTEND_URL}/reset-password?token=...`.
+2. `POST /auth/reset-password` con `{ token, password }` → valida el hash y el vencimiento, aplica la política de contraseña, guarda la nueva (argon2id), **consume el token** (un solo uso) y **revoca todas las sesiones activas** (`refresh_token_hash = null`): si la cuenta estaba comprometida, el atacante queda fuera.
+
+El envío usa **nodemailer** ([mail.service.ts](src/modules/mail/mail.service.ts), en el `MailModule` global y reutilizable). Sin `MAIL_HOST` configurado, el correo se escribe en los logs en vez de enviarse — la app arranca sin SMTP en desarrollo; en producción se configuran las variables `MAIL_*`.
+
+Los correos se arman con **templates multi-idioma** en [templates/](src/modules/mail/templates): cada template es una función que recibe el idioma y sus parámetros y devuelve `{ subject, html, text }`. Las traducciones viven junto a los templates (`templates/i18n/es.json`, `en.json`) y el idioma sale del request (`Accept-Language`), igual que el resto de la API, con fallback a español. Para agregar un idioma: crear el JSON y sumarlo al mapa de `mail-template.ts`; para un correo nuevo: crear su `*.template.ts` reutilizando `layout()` e `interpolate()`.
+
 ### Política de contraseñas
 
-El registro valida la fortaleza de la contraseña en [register.dto.ts](src/modules/auth/dto/register.dto.ts): entre **8 y 128 caracteres** y debe contener al menos **una minúscula, una mayúscula, un número y un carácter especial**. El login no aplica la política (solo valida tipo y longitud máxima), para no rechazar credenciales legítimas creadas antes de un cambio de reglas. Los mensajes de error salen traducidos (es/en) vía `nestjs-i18n`.
+La política vive en el decorador reutilizable [`@IsStrongPassword()`](src/common/decorators/is-strong-password.decorator.ts), usado en registro y en el reset de contraseña: entre **8 y 128 caracteres** y al menos **una minúscula, una mayúscula, un número y un carácter especial**. El login no aplica la política (solo valida tipo y longitud máxima), para no rechazar credenciales legítimas creadas antes de un cambio de reglas. Los mensajes de error salen traducidos (es/en) vía `nestjs-i18n`.
 
 ### Propiedades de las cookies ([cookie.service.ts](src/modules/auth/cookie.service.ts))
 
@@ -272,12 +289,14 @@ src/
 ├── app.module.ts            # config, DB, logger, throttler + providers globales
 ├── config/                  # validación Joi + configs tipadas por dominio
 ├── common/
-│   ├── decorators/          # @Public, @CurrentUser
+│   ├── decorators/          # @Public, @CurrentUser, @IsStrongPassword
 │   ├── entities/            # BaseEntity (id, timestamps, soft delete)
 │   └── filters/             # filtro global de excepciones + validación i18n
 ├── i18n/                    # traducciones de errores y validación (es, en)
 ├── database/                # módulo TypeORM, data-source del CLI, migraciones
 ├── modules/
+│   ├── mail/                # MailModule global: envío vía nodemailer
+│   │   └── templates/       # templates de correo + traducciones (i18n/es|en)
 │   ├── users/
 │   │   ├── entities/        # entidad User
 │   │   ├── use-cases/       # get-profile

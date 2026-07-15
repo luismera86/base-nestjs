@@ -20,18 +20,20 @@ import {
 } from './config/env.validation';
 import jwtConfig from './config/jwt.config';
 import { loggerFactory } from './config/logger.config';
+import mailConfig from './config/mail.config';
 import throttlerConfig, { throttlerFactory } from './config/throttler.config';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
+import { MailModule } from './modules/mail/mail.module';
 import { UsersModule } from './modules/users/users.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, jwtConfig, throttlerConfig],
+      load: [appConfig, databaseConfig, jwtConfig, throttlerConfig, mailConfig],
       validationSchema: envValidationSchema,
       validationOptions: envValidationOptions,
     }),
@@ -53,6 +55,7 @@ import { UsersModule } from './modules/users/users.module';
       resolvers: [AcceptLanguageResolver],
     }),
     DatabaseModule,
+    MailModule,
     UsersModule,
     AuthModule,
     HealthModule,
